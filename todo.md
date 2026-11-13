@@ -17,7 +17,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 ## Phase 0: Project Foundations
 
 ### Repo & licensing
-- [ ] `git init`, `.gitignore`, default branch `main`
+- [ ] `git init`, `.gitignore`, default branch `master`
 - [ ] `LICENSE-MIT` (© 2026 TPT Solutions)
 - [ ] `LICENSE-APACHE` (© 2026 TPT Solutions)
 - [ ] License headers / `license = "MIT OR Apache-2.0"` in every Cargo.toml
