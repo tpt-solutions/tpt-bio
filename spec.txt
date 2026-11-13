@@ -1,0 +1,151 @@
+tpt-bio Design Specification (v0.2)
+1. Overview
+tpt-bio is a pure Rust, high-performance bioinformatics and biological image analysis engine. It serves as the unified, zero-FFI replacement for HTSlib (sequence data) and CellProfiler (biological image analysis).
+Unlike legacy tools that rely on C/C++ FFI or permissively-licensed-but-restrictive dependencies, tpt-bio is built from the ground up to be 100% MIT-compatible, ensuring frictionless adoption by academic and commercial entities while maintaining strict solo-maintainer control.
+2. Design Goals
+Strict Permissive Licensing: Every dependency, direct or transitive, must be MIT, BSD, Zlib, or Dual MIT/Apache-2.0. GPL, LGPL, AGPL, and "Apache-2.0 ONLY" crates are strictly banned.
+Zero-FFI & Memory Safety: No bindgen wrappers for C-libraries (like htslib or opencv). All parsing, compression, and image processing is written in safe Rust.
+no_std Core: The foundational logic (tpt-bio-core) must support no_std + alloc for edge sequencing devices and embedded lab robotics.
+Unified Substrate: Leverages the internal tpt-math and tpt-simd crates to provide high-performance numerical computation without external bloat.
+Fearless Concurrency: Genomic pipelines and high-content screening (HCS) are embarrassingly parallel. The architecture uses rayon and crossbeam (MIT/Apache-2.0) for data-race-free parallelism.
+3. Workspace Architecture
+tpt-bio/
+├── tpt-bio-core/        # Shared bio-types, statistics, and parallel iterators (no_std)
+├── tpt-bio-seq/         # HTSlib replacement: FASTQ, BAM, CRAM, VCF, BAI/CRAI indexing
+├── tpt-bio-vision/      # CellProfiler replacement: OME-TIFF, segmentation, feature extraction
+├── tpt-bio-pipeline/    # Streaming execution engine (DAG-based workflow orchestration)
+├── tpt-bio-cli/         # The `tptbio` unified command-line tool
+└── bindings/
+    └── tpt-bio-py/      # PyO3 bindings (MIT) for the broader Python bio-ecosystem
+4. Crate Breakdown
+4.1 tpt-bio-core (The Foundation)
+Role: The no_std leaf crate. Contains shared biological data types (Amino acids, nucleotides, quality scores), statistical distributions (Poisson, Binomial), and basic bio-math.
+Dependencies: tpt-math (Internal), num-traits (MIT/Apache-2.0).
+4.2 tpt-bio-seq (The HTSlib Killer)
+Role: Handles all high-throughput sequencing data.
+Key Features:
+Pure Rust BGZF: A custom, highly optimized Block GZIP implementation using flate2 (MIT/Apache-2.0) or zstd (MIT/BSD).
+Zero-Copy Parsers: Parsers for SAM/BAM/VCF/BCF that map directly over memory-mapped files.
+Random Access: BAI (BAM Index) and CRAI (CRAM Index) parsing for O(log N) genomic region queries.
+Dependencies: noodles (MIT/Apache-2.0) concepts or custom implementation, tpt-simd (Internal).
+4.3 tpt-bio-vision (The CellProfiler Killer)
+Role: Handles high-content biological imaging (microscopy, phenotyping).
+Key Features:
+Format Support: Pure Rust parsers for OME-TIFF, Zarr, and high-content screening (HCS) plate layouts using the image crate (MIT).
+Image Processing: Morphological operations, edge detection, and filtering powered entirely by tpt-simd.
+Segmentation Engine: Graph-based and watershed segmentation algorithms using tpt-math for sparse matrix graph cuts.
+Dependencies: image (MIT), ndarray (MIT/Apache-2.0), tpt-math (Internal), tpt-simd (Internal).
+4.4 tpt-bio-pipeline (The Orchestrator)
+Role: The glue that turns tpt-bio-seq and tpt-bio-vision into a workflow engine.
+Key Features: Implements a Directed Acyclic Graph (DAG) execution model for streaming data between sequence parsing and image analysis.
+4.5 tpt-bio-cli & tpt-bio-py
+tpt-bio-cli: Fast, ergonomic CLI using clap (MIT/Apache-2.0).
+tpt-bio-py: PyO3 bindings (MIT). Crucial for adoption, allowing Python users to call the Rust engine natively.
+5. Licensing & Dependency Hardening (Critical)
+5.1 The "MIT-First" Policy
+To maintain maximum adoption and minimize legal friction, tpt-bio enforces a zero-tolerance policy on restrictive licenses.
+Allowed: MIT, Dual MIT/Apache-2.0, BSD (2/3-Clause), Zlib, Unicode, ISC.
+Strictly Banned: GPL (v2/v3), AGPL, LGPL, MPL, and Apache-2.0 ONLY (to ensure the MIT license path remains 100% unencumbered).
+5.2 Automated Compliance via cargo-deny
+This policy is enforced automatically in CI. The repository includes a deny.toml configuration that fails the build if a banned license is introduced.
+deny.toml Configuration:
+[licenses]
+unlicensed = "deny"
+allow-osi-fsf-free = "neither"
+copyleft = "deny" # Blocks GPL, AGPL, LGPL, MPL
+confidence-threshold = 0.93
+
+# Explicitly allow only the safest permissive licenses
+allow = [
+    "MIT",
+    "Apache-2.0", # Allowed because we assume dual-licensing; see exceptions below
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Zlib",
+    "Unicode-3.0",
+    "ISC",
+]
+
+# Explicitly ban specific problematic licenses
+deny = [
+    "GPL-2.0",
+    "GPL-3.0",
+    "AGPL-3.0",
+    "LGPL-2.1",
+    "LGPL-3.0",
+    "MPL-2.0",
+]
+
+# Exceptions: If a crate is Apache-2.0 ONLY (no MIT option), it must be banned
+# or explicitly reviewed. We prefer crates that offer the MIT option.
+[[licenses.clarify]]
+name = "ring"
+version = "*"
+expression = "MIT AND ISC AND OpenSSL"
+license-path = "LICENSE"
+5.3 Compliant Dependency Selection
+Legacy C/C++ Tool
+Banned/Problematic Rust Crate
+Approved tpt-bio Crate
+License
+HTSlib (BAM/VCF)
+htslib (C FFI)
+noodles (or custom pure Rust)
+MIT / Apache-2.0
+Zlib/GZIP
+libz-sys (C FFI)
+flate2 (Rust backend)
+MIT / Apache-2.0
+OpenCV / ITK
+opencv, itk-rs
+image, ndarray, tpt-simd
+MIT / Apache-2.0
+Python Bindings
+cpython
+pyo3
+MIT
+Parallelism
+OpenMP (C++)
+rayon, crossbeam
+MIT / Apache-2.0
+CLI Parsing
+argh (Apache-2.0 only)
+clap (Dual Licensed)
+MIT / Apache-2.0
+6. Key Technical Decisions (ADRs)
+ADR-001: Pure Rust BGZF over FFI to libhts
+Decision: We will write our own BGZF (Blocked GZIP) compression/decompression engine or use noodles rather than linking to libhts via bindgen.
+Rationale: Linking to C libraries violates the zero-FFI goal and introduces cross-compilation nightmares. Rust's flate2 and zstd crates are mature enough to build a fully compliant, thread-safe BGZF implementation natively.
+ADR-002: SIMD-Accelerated Image Convolution
+Decision: All 2D/3D convolution kernels in tpt-bio-vision will be written using tpt-simd.
+Rationale: Biological images are massive. Naive Rust loops are too slow; C++ relies on OpenCV (which has complex licensing/FFI). By using tpt-simd, we get AVX2/AVX-512/NEON acceleration natively in safe Rust.
+ADR-003: WebGPU for 3D Cellular Volumes
+Decision: 3D rendering of cellular volumes will use wgpu (WebGPU), sharing the rendering paradigm established in tpt-vertex.
+Rationale: Allows biologists to view massive 3D cell models directly in the browser or via a lightweight Tauri desktop app. wgpu is MIT/Apache-2.0 compliant.
+7. Data Flow Example: High-Content Phenotypic Screening
+Ingestion (tpt-bio-vision): Reads a 50GB OME-TIFF plate directly from cloud storage (S3) using memory-mapped I/O.
+Preprocessing (tpt-simd): Applies a 3D Gaussian blur and background subtraction using vectorized SIMD instructions.
+Segmentation (tpt-math + tpt-bio-vision): Uses a marker-controlled watershed algorithm to separate touching cells.
+Feature Extraction (tpt-bio-vision): Calculates 500+ morphological features per cell.
+Statistical Analysis (tpt-bio-core + tpt-math): Applies PCA and clustering to group cells by phenotype.
+Export (tpt-bio-py): Results are exposed to a Python Jupyter notebook via PyO3.
+8. Phased Roadmap (Solo Maintainer Strategy)
+Phase 1: The Sequence Core (Months 1-3)
+Scaffold the Cargo workspace.
+Implement tpt-bio-core (nucleotide types, basic stats).
+Implement tpt-bio-seq: FASTQ parsing, SAM/BAM reading, and pure Rust BGZF decompression.
+Milestone: tptbio seq view can read and index a standard human genome BAM file faster than samtools.
+Phase 2: The Vision Core (Months 4-6)
+Implement tpt-bio-vision: OME-TIFF reading, basic 2D image loading.
+Integrate tpt-simd for 2D convolutions.
+Implement Otsu thresholding and basic watershed segmentation.
+Milestone: tptbio vision segment can process a 96-well plate microscopy image in seconds.
+Phase 3: Integration & Python Bindings (Months 7-9)
+Build tpt-bio-pipeline to chain sequence and vision tasks.
+Implement tpt-bio-py (PyO3).
+Write the tpt-bio-cli frontend.
+Milestone: Release v0.1.0 on crates.io and PyPI.
+9. Licensing
+tpt-bio is dual-licensed under MIT and Apache-2.0.
+Copyright: © 2026 TPT Solutions.
+Philosophy: By strictly enforcing permissive dependencies, we ensure that any downstream user (academic or commercial) can adopt this software under the MIT license without legal friction, while you retain full control as the solo maintainer.

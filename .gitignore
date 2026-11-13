@@ -1,0 +1,40 @@
+# Rust
+/target/
+**/target/
+Cargo.lock.bak
+**/*.rs.bk
+*.pdb
+
+# Python bindings
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Fuzzing / benchmarks
+fuzz/artifacts/
+fuzz/corpus/
+criterion/
+
+# Large test data (keep small fixtures only)
+/data/
+*.bam.bai.tmp
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Env / secrets
+.env
+.env.*
