@@ -10,6 +10,20 @@
 
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
+/// Reads exactly `len` bytes into a new vector.
+///
+/// Length fields in untrusted input can claim gigabytes. The vector grows only as
+/// bytes actually arrive, so a short input allocates little, and a truncated input
+/// returns [`io::ErrorKind::UnexpectedEof`].
+pub(crate) fn read_bounded<R: Read>(r: &mut R, len: usize) -> io::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let got = r.by_ref().take(len as u64).read_to_end(&mut out)?;
+    if got != len {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "truncated input"));
+    }
+    Ok(out)
+}
+
 use flate2::{Compression, Crc, read::DeflateDecoder, write::DeflateEncoder};
 use rayon::prelude::*;
 

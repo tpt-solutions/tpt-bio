@@ -4,7 +4,9 @@
 //! project. Its core crate has no dependencies. Parquet files would need
 //! `tpt-strata-parquet`, which depends on Arrow and so is not used here.
 
-use tpt_strata::{Column, Scalar, Table};
+use std::sync::Arc;
+
+use tpt_strata::{ArrayRef, Batch, DataType, Field, I64Array, Scalar, Schema, StrArray, Table};
 
 use crate::error::{Result, SeqError};
 use crate::header::Header;
@@ -71,20 +73,56 @@ pub fn records_to_table(records: &[Record], header: &Header) -> Result<Table> {
         });
     }
 
-    let columns = vec![
-        Column::new(COLUMNS[0], qname),
-        Column::new(COLUMNS[1], flag),
-        Column::new(COLUMNS[2], rname),
-        Column::new(COLUMNS[3], pos),
-        Column::new(COLUMNS[4], mapq),
-        Column::new(COLUMNS[5], cigar),
-        Column::new(COLUMNS[6], rnext),
-        Column::new(COLUMNS[7], pnext),
-        Column::new(COLUMNS[8], tlen),
-        Column::new(COLUMNS[9], seq),
-        Column::new(COLUMNS[10], qual),
+    // The schema is declared, not inferred: a column that is entirely NULL (for
+    // example RNEXT when every record has `*`) has no value to infer a type from.
+    let utf8 = |values: Vec<Scalar>| {
+        ArrayRef::Utf8(StrArray::from_nulls(
+            values
+                .into_iter()
+                .map(|v| match v {
+                    Scalar::Str(s) => Some(Arc::from(s.as_str())),
+                    _ => None,
+                })
+                .collect(),
+        ))
+    };
+    let int64 = |values: Vec<Scalar>| {
+        ArrayRef::Int64(I64Array::from_nulls(
+            values
+                .into_iter()
+                .map(|v| match v {
+                    Scalar::I64(x) => Some(x),
+                    _ => None,
+                })
+                .collect(),
+        ))
+    };
+    let columns: [(Vec<Scalar>, DataType); 11] = [
+        (qname, DataType::Utf8),
+        (flag, DataType::Int64),
+        (rname, DataType::Utf8),
+        (pos, DataType::Int64),
+        (mapq, DataType::Int64),
+        (cigar, DataType::Utf8),
+        (rnext, DataType::Utf8),
+        (pnext, DataType::Int64),
+        (tlen, DataType::Int64),
+        (seq, DataType::Utf8),
+        (qual, DataType::Utf8),
     ];
-    Table::try_new(columns).map_err(|e| SeqError::Unsupported(format!("record table: {e}")))
+    let mut fields = Vec::with_capacity(columns.len());
+    let mut arrays = Vec::with_capacity(columns.len());
+    for ((values, data_type), name) in columns.into_iter().zip(COLUMNS) {
+        fields.push(Field::new(name, data_type, true));
+        arrays.push(match data_type {
+            DataType::Int64 => int64(values),
+            _ => utf8(values),
+        });
+    }
+    let schema = Arc::new(Schema::new(fields));
+    let batch = Batch::try_new(schema.clone(), arrays)
+        .map_err(|e| SeqError::Unsupported(format!("record table: {e}")))?;
+    Ok(Table::from_batches(schema, vec![batch]))
 }
 
 /// Renders records as CSV with a header row, via `tpt-strata`.

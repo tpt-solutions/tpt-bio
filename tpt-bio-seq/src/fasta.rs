@@ -308,7 +308,9 @@ impl Fai {
         if beg >= end {
             return Ok(Vec::new());
         }
-        let mut out = Vec::with_capacity((end - beg) as usize);
+        // The output cannot be longer than the data it is read from, so a lying
+        // index length cannot force a large up-front allocation.
+        let mut out = Vec::with_capacity(((end - beg) as usize).min(data.len()));
         let mut base = beg;
         while base < end {
             let line = base / e.line_bases;

@@ -8,7 +8,7 @@ use std::io::{Read, Seek, Write};
 
 use tpt_bio_core::Iupac;
 
-use crate::bgzf::{BgzfReader, BgzfWriter, VirtualOffset};
+use crate::bgzf::{BgzfReader, BgzfWriter, VirtualOffset, read_bounded};
 use crate::error::{Result, SeqError};
 use crate::header::{Header, Reference};
 use crate::record::{CigarKind, CigarOp, Flags, Record, Tag, TagValue};
@@ -485,16 +485,14 @@ impl<R: Read> BamReader<R> {
             return Err(bad("missing BAM magic"));
         }
         let text_len = read_u32(&mut inner)? as usize;
-        let mut text = vec![0u8; text_len];
-        read_exact(&mut inner, &mut text)?;
+        let text = read_vec(&mut inner, text_len)?;
         let text = String::from_utf8(strip_nul(&text).to_vec())
             .map_err(|_| bad("header text is not UTF-8"))?;
         let n_ref = read_u32(&mut inner)?;
         let mut references = Vec::new();
         for _ in 0..n_ref {
             let l_name = read_u32(&mut inner)? as usize;
-            let mut name = vec![0u8; l_name];
-            read_exact(&mut inner, &mut name)?;
+            let name = read_vec(&mut inner, l_name)?;
             let name = String::from_utf8(strip_nul(&name).to_vec())
                 .map_err(|_| bad("reference name is not UTF-8"))?;
             let len = u64::from(read_u32(&mut inner)?);
@@ -538,8 +536,12 @@ impl<R: Read> BamReader<R> {
             return Err(bad("truncated record size"));
         }
         let size = u32::from_le_bytes(size_bytes) as usize;
-        self.body.resize(size, 0);
-        read_exact(&mut self.inner, &mut self.body)?;
+        if size <= INLINE_RECORD_BYTES {
+            self.body.resize(size, 0);
+            read_exact(&mut self.inner, &mut self.body)?;
+        } else {
+            self.body = read_vec(&mut self.inner, size)?;
+        }
         let end = self.inner.virtual_position();
         Ok(Some((begin, end, RecordView::new(&self.body)?)))
     }
@@ -615,6 +617,18 @@ impl<W: Write> BamWriter<W> {
 
 fn strip_nul(bytes: &[u8]) -> &[u8] {
     bytes.strip_suffix(&[0]).unwrap_or(bytes)
+}
+
+/// Records up to this size reuse the record buffer; larger ones are read with
+/// [`read_vec`] so a corrupt size field cannot force a large zero-filled allocation.
+const INLINE_RECORD_BYTES: usize = 1 << 16;
+
+/// Reads `len` bytes that were length-prefixed in the file. See [`read_bounded`].
+fn read_vec<R: Read>(r: &mut R, len: usize) -> Result<Vec<u8>> {
+    read_bounded(r, len).map_err(|e| match e.kind() {
+        std::io::ErrorKind::UnexpectedEof => bad("truncated file"),
+        _ => SeqError::Io(e),
+    })
 }
 
 fn read_exact<R: Read>(r: &mut R, buf: &mut [u8]) -> Result<()> {

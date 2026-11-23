@@ -46,13 +46,14 @@ fn parse_meta(text: &str) -> Result<(Vec<HeaderRecord>, Vec<String>)> {
     let mut records = Vec::new();
     let mut comments = Vec::new();
     for line in text.lines() {
-        if let Some(comment) = line.strip_prefix("@CO	") {
+        if let Some(comment) = line.strip_prefix("@CO\t") {
             comments.push(comment.to_string());
             continue;
         }
-        let Some(kind) = ["HD", "RG", "PG"].into_iter().find(|k| {
-            line.strip_prefix('@').is_some_and(|rest| rest.starts_with(k))
-        }) else {
+        let Some(kind) = ["HD", "RG", "PG"]
+            .into_iter()
+            .find(|k| line.strip_prefix('@').is_some_and(|rest| rest.starts_with(k)))
+        else {
             continue;
         };
         let mut fields = Vec::new();
@@ -168,7 +169,7 @@ impl Header {
         self.records.iter().filter(|r| r.kind == "PG")
     }
 
-    /// The text of all `@CO` comment lines, in order, without the `@CO	` prefix.
+    /// The text of all `@CO` comment lines, in order, without the `@CO\t` prefix.
     #[must_use]
     pub fn comments(&self) -> &[String] {
         &self.comments
@@ -193,7 +194,7 @@ mod tests {
 
     #[test]
     fn parses_references_and_keeps_text() {
-        let text = "@HD	VN:1.6	SO:coordinate\n@SQ	SN:chr1	LN:248956422\n@SQ	SN:chr2	LN:242193529\n@RG	ID:rg1\n";
+        let text = "@HD\tVN:1.6\tSO:coordinate\n@SQ\tSN:chr1\tLN:248956422\n@SQ\tSN:chr2\tLN:242193529\n@RG\tID:rg1\n";
         let h = Header::parse(text).unwrap();
         assert_eq!(h.text(), text);
         assert_eq!(h.references().len(), 2);
@@ -204,25 +205,25 @@ mod tests {
 
     #[test]
     fn parses_header_metadata() {
-        let text = "@HD	VN:1.6	SO:coordinate
-@SQ	SN:chr1	LN:10
-@RG	ID:rg1	SM:s1
-@RG	ID:rg2	SM:s2
-@PG	ID:bwa	PN:bwa
-@CO	free text	kept
+        let text = "@HD\tVN:1.6\tSO:coordinate
+@SQ\tSN:chr1\tLN:10
+@RG\tID:rg1\tSM:s1
+@RG\tID:rg2\tSM:s2
+@PG\tID:bwa\tPN:bwa
+@CO\tfree text\tkept
 ";
         let h = Header::parse(text).unwrap();
         assert_eq!(h.hd().and_then(|r| r.get("SO")), Some("coordinate"));
         let rgs: Vec<_> = h.read_groups().map(|r| r.get("SM")).collect();
         assert_eq!(rgs, [Some("s1"), Some("s2")]);
         assert_eq!(h.programs().next().and_then(|r| r.get("PN")), Some("bwa"));
-        assert_eq!(h.comments(), ["free text	kept"]);
+        assert_eq!(h.comments(), ["free text\tkept"]);
         assert_eq!(h.references().len(), 1);
     }
 
     #[test]
     fn rejects_bad_and_duplicate_sq() {
-        assert!(Header::parse("@SQ	SN:chr1\n").is_err());
-        assert!(Header::parse("@SQ	SN:chr1	LN:5\n@SQ	SN:chr1	LN:5\n").is_err());
+        assert!(Header::parse("@SQ\tSN:chr1\n").is_err());
+        assert!(Header::parse("@SQ\tSN:chr1\tLN:5\n@SQ\tSN:chr1\tLN:5\n").is_err());
     }
 }

@@ -28,11 +28,11 @@ impl MappedFile {
     /// # Errors
     /// Returns an I/O error if the file cannot be opened or mapped.
     ///
-    /// # Safety contract
+    /// # Safety
     /// The caller must not truncate or modify the file while the returned value
     /// is alive. Modification by another process while mapped is undefined behavior.
     #[allow(unsafe_code)]
-    pub fn open(path: &Path) -> io::Result<Self> {
+    pub unsafe fn open(path: &Path) -> io::Result<Self> {
         let file = File::open(path)?;
         if file.metadata()?.len() == 0 {
             // Zero-length mappings are rejected on some platforms.
@@ -63,6 +63,8 @@ impl Deref for MappedFile {
 }
 
 #[cfg(test)]
+// The tests map files, which needs `unsafe`; the files are not modified while mapped.
+#[allow(unsafe_code)]
 mod tests {
     use super::*;
     use std::io::Write;
@@ -76,12 +78,14 @@ mod tests {
             let mut f = File::create(&path).unwrap();
             f.write_all(b"hello mmap").unwrap();
         }
-        let m = MappedFile::open(&path).unwrap();
+        // SAFETY: the test file is not modified while it is mapped.
+        let m = unsafe { MappedFile::open(&path) }.unwrap();
         assert_eq!(&m[..], b"hello mmap");
 
         let empty = dir.join("empty.bin");
         File::create(&empty).unwrap();
-        assert!(MappedFile::open(&empty).unwrap().is_empty());
+        // SAFETY: the test file is not modified while it is mapped.
+        assert!(unsafe { MappedFile::open(&empty) }.unwrap().is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
