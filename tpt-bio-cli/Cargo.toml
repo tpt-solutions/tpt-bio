@@ -1,0 +1,23 @@
+[package]
+name = "tpt-bio-cli"
+description = "The tptbio command-line tool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+readme.workspace = true
+
+[[bin]]
+name = "tptbio"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+tpt-bio-core.workspace = true
+tpt-bio-seq.workspace = true
+tpt-bio-vision.workspace = true
+tpt-bio-pipeline.workspace = true
+
+[lints]
+workspace = true
