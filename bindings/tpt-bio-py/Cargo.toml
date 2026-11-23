@@ -6,6 +6,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
+readme = "README.md"
 
 [lib]
 name = "tpt_bio"
@@ -13,7 +14,11 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pyo3.workspace = true
+numpy = { version = "0.30", default-features = false }
 tpt-bio-core.workspace = true
+tpt-bio-seq.workspace = true
+tpt-bio-vision.workspace = true
+tpt-bio-pipeline.workspace = true
 
 [lints]
 workspace = true
