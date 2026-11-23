@@ -21,6 +21,7 @@ build/
 # Fuzzing / benchmarks
 fuzz/artifacts/
 fuzz/corpus/
+fuzz/target/
 criterion/
 
 # Large test data (keep small fixtures only)
