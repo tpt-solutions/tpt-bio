@@ -1,0 +1,23 @@
+[package]
+name = "tpt-bio-core"
+description = "Shared biological types, statistics and bio-math for tpt-bio (no_std + alloc)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+readme.workspace = true
+
+[features]
+default = ["std"]
+# Enables std-only helpers such as rayon-based parallel iterators.
+# Poisson and Binomial distributions need tpt-math, which requires `std`.
+std = ["dep:rayon", "dep:tpt-math-prob-dist"]
+
+[dependencies]
+tpt-math-prob-dist = { version = "0.2", optional = true }
+libm.workspace = true
+rayon = { workspace = true, optional = true }
+
+[lints]
+workspace = true
