@@ -6,18 +6,59 @@
 //! results of its predecessors. [`Dag::execute_parallel`] runs every level of
 //! independent nodes on the rayon thread pool.
 //!
-//! This is the in-memory executor. Streaming between nodes, checkpointing and
-//! pipeline files are not implemented yet; see `todo.md`.
+//! The [`Dag`] executors run nodes in memory. [`Progress`] receives a callback when
+//! each node starts and finishes. The [`typed`] module adds port types, and
+//! [`checkpoint`] persists node outputs so a rerun can resume. [`stream`] provides
+//! a bounded, backpressured map over an iterator. The [`definition`] module parses
+//! TOML pipeline files, and [`execute`] runs the built-in nodes: statistics, sequence I/O and 2D vision steps.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod checkpoint;
+pub mod definition;
+pub mod execute;
+pub mod stream;
+pub mod typed;
+
+mod seq_nodes;
+mod vision_nodes;
+
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use rayon::prelude::*;
+
+pub use checkpoint::{CheckpointError, CheckpointStore, Codec};
+pub use definition::{DefinitionError, NodeKind, Pipeline};
+pub use execute::{Frame, Records, RunError, Value};
+pub use typed::{TypeTag, TypedDag, TypedError};
+
+/// Receives a callback as each node starts and finishes.
+///
+/// Parallel executors call these methods from rayon worker threads, so the
+/// implementation must be `Sync`. The counts are approximate under parallelism:
+/// `completed` is read when the event fires, not at a single synchronized instant.
+pub trait Progress: Sync {
+    /// Called just before a node's function runs. `completed` is the number of
+    /// nodes that had finished when this node started, and `total` is the node count.
+    fn node_started(&self, node: NodeId, completed: usize, total: usize);
+
+    /// Called after a node's function returns. `completed` includes this node.
+    /// `ok` is false when the function returned an error.
+    fn node_finished(&self, node: NodeId, completed: usize, total: usize, ok: bool);
+}
+
+/// A [`Progress`] implementation that ignores every event.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoProgress;
+
+impl Progress for NoProgress {
+    fn node_started(&self, _: NodeId, _: usize, _: usize) {}
+    fn node_finished(&self, _: NodeId, _: usize, _: usize, _: bool) {}
+}
 
 /// Identifier of a node within one [`Dag`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -28,6 +69,10 @@ impl NodeId {
     #[must_use]
     pub const fn index(self) -> usize {
         self.0
+    }
+
+    pub(crate) const fn from_index(index: usize) -> Self {
+        Self(index)
     }
 }
 
@@ -224,8 +269,26 @@ impl<T> Dag<T> {
     where
         F: Fn(NodeId, &T, &[&R]) -> Result<R, E>,
     {
-        let mut results: Vec<Option<R>> = (0..self.len()).map(|_| None).collect();
-        for n in self.topological_order() {
+        self.execute_observed(cancel, &NoProgress, f)
+    }
+
+    /// Like [`Dag::execute`], reporting each node's start and finish to `progress`.
+    ///
+    /// # Errors
+    /// Same as [`Dag::execute`].
+    pub fn execute_observed<R, E, F, P>(
+        &self,
+        cancel: &AtomicBool,
+        progress: &P,
+        f: F,
+    ) -> Result<Vec<R>, ExecError<E>>
+    where
+        F: Fn(NodeId, &T, &[&R]) -> Result<R, E>,
+        P: Progress,
+    {
+        let total = self.len();
+        let mut results: Vec<Option<R>> = (0..total).map(|_| None).collect();
+        for (completed, n) in self.topological_order().into_iter().enumerate() {
             if cancel.load(Ordering::Relaxed) {
                 return Err(ExecError::Cancelled);
             }
@@ -233,8 +296,10 @@ impl<T> Dag<T> {
                 .iter()
                 .map(|p| results[p.0].as_ref().expect("predecessors run first"))
                 .collect();
-            let value = f(n, &self.payloads[n.0], &inputs)
-                .map_err(|error| ExecError::Node { node: n, error })?;
+            progress.node_started(n, completed, total);
+            let outcome = f(n, &self.payloads[n.0], &inputs);
+            progress.node_finished(n, completed + 1, total, outcome.is_ok());
+            let value = outcome.map_err(|error| ExecError::Node { node: n, error })?;
             results[n.0] = Some(value);
         }
         Ok(results.into_iter().flatten().collect())
@@ -259,7 +324,28 @@ impl<T: Sync> Dag<T> {
         E: Send,
         F: Fn(NodeId, &T, &[&R]) -> Result<R, E> + Sync,
     {
-        let mut results: Vec<Option<R>> = (0..self.len()).map(|_| None).collect();
+        self.execute_parallel_observed(cancel, &NoProgress, f)
+    }
+
+    /// Like [`Dag::execute_parallel`], reporting each node's start and finish to `progress`.
+    ///
+    /// # Errors
+    /// Same as [`Dag::execute_parallel`].
+    pub fn execute_parallel_observed<R, E, F, P>(
+        &self,
+        cancel: &AtomicBool,
+        progress: &P,
+        f: F,
+    ) -> Result<Vec<R>, ExecError<E>>
+    where
+        R: Send + Sync,
+        E: Send,
+        F: Fn(NodeId, &T, &[&R]) -> Result<R, E> + Sync,
+        P: Progress,
+    {
+        let total = self.len();
+        let finished = AtomicUsize::new(0);
+        let mut results: Vec<Option<R>> = (0..total).map(|_| None).collect();
         for level in self.levels() {
             if cancel.load(Ordering::Relaxed) {
                 return Err(ExecError::Cancelled);
@@ -271,7 +357,11 @@ impl<T: Sync> Dag<T> {
                         .iter()
                         .map(|p| results[p.0].as_ref().expect("earlier levels ran first"))
                         .collect();
-                    (n, f(n, &self.payloads[n.0], &inputs))
+                    progress.node_started(n, finished.load(Ordering::SeqCst), total);
+                    let outcome = f(n, &self.payloads[n.0], &inputs);
+                    let done = finished.fetch_add(1, Ordering::SeqCst) + 1;
+                    progress.node_finished(n, done, total, outcome.is_ok());
+                    (n, outcome)
                 })
                 .collect();
             let mut failed: Option<(NodeId, E)> = None;
@@ -363,5 +453,85 @@ mod tests {
         let cancel = AtomicBool::new(true);
         let err = g.execute(&cancel, |_, v, _: &[&u32]| Ok::<_, Infallible>(*v)).unwrap_err();
         assert_eq!(err, ExecError::Cancelled);
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+    use std::convert::Infallible;
+    use std::sync::Mutex;
+
+    /// Records `(event, node index, completed, ok)` for every callback.
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<(&'static str, usize, usize, bool)>>);
+
+    impl Progress for Recorder {
+        fn node_started(&self, node: NodeId, completed: usize, _total: usize) {
+            self.0.lock().unwrap().push(("start", node.index(), completed, true));
+        }
+        fn node_finished(&self, node: NodeId, completed: usize, _total: usize, ok: bool) {
+            self.0.lock().unwrap().push(("finish", node.index(), completed, ok));
+        }
+    }
+
+    fn chain(n: usize) -> Dag<u32> {
+        let mut g = Dag::new();
+        let ids: Vec<NodeId> = (0..n).map(|i| g.add_node(i as u32)).collect();
+        for w in ids.windows(2) {
+            g.add_edge(w[0], w[1]).unwrap();
+        }
+        g
+    }
+
+    #[test]
+    fn sequential_reports_each_node_in_order() {
+        let g = chain(3);
+        let rec = Recorder::default();
+        let cancel = AtomicBool::new(false);
+        let out =
+            g.execute_observed(&cancel, &rec, |_, v, _: &[&u32]| Ok::<_, Infallible>(*v)).unwrap();
+        assert_eq!(out, vec![0, 1, 2]);
+        let events = rec.0.lock().unwrap().clone();
+        assert_eq!(
+            events,
+            vec![
+                ("start", 0, 0, true),
+                ("finish", 0, 1, true),
+                ("start", 1, 1, true),
+                ("finish", 1, 2, true),
+                ("start", 2, 2, true),
+                ("finish", 2, 3, true),
+            ]
+        );
+    }
+
+    #[test]
+    fn parallel_reports_every_node_once() {
+        let g = chain(4);
+        let rec = Recorder::default();
+        let cancel = AtomicBool::new(false);
+        g.execute_parallel_observed(&cancel, &rec, |_, v, _: &[&u32]| Ok::<_, Infallible>(*v))
+            .unwrap();
+        let events = rec.0.lock().unwrap().clone();
+        assert_eq!(events.len(), 8);
+        let mut finished: Vec<usize> =
+            events.iter().filter(|e| e.0 == "finish").map(|e| e.1).collect();
+        finished.sort_unstable();
+        assert_eq!(finished, vec![0, 1, 2, 3]);
+        assert_eq!(events.iter().filter(|e| e.0 == "finish").map(|e| e.2).max(), Some(4));
+    }
+
+    #[test]
+    fn failing_node_reports_not_ok() {
+        let g = chain(2);
+        let rec = Recorder::default();
+        let cancel = AtomicBool::new(false);
+        let err = g
+            .execute_observed(&cancel, &rec, |_, _, _: &[&u32]| Err::<u32, _>("nope"))
+            .unwrap_err();
+        assert!(matches!(err, ExecError::Node { error: "nope", .. }));
+        let events = rec.0.lock().unwrap().clone();
+        assert_eq!(events, vec![("start", 0, 0, true), ("finish", 0, 1, false)]);
     }
 }

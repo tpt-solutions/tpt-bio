@@ -1,0 +1,94 @@
+# High-content phenotypic screening, spec section 7, steps 1 to 6.
+#
+# Built-in nodes cover this flow on 2D images. The spec's 50 GB OME-TIFF read from S3
+# and the 3D blur are not available: step 1 reads one PNG or TIFF channel from a local
+# file, and step 2 uses 2D filters.
+#
+# Paths are relative to the working directory. The integration test rewrites every
+# 'screen/' prefix to a generated directory, so the same file runs on generated input.
+
+# Step 1, ingestion: one channel of the plate image.
+[[nodes]]
+name = "plate"
+type = "load_image"
+params = { path = 'screen/plate.png', channel = 0 }
+
+# Step 2, preprocessing: smoothing and background subtraction.
+[[nodes]]
+name = "smooth"
+type = "gaussian"
+params = { sigma = 1.0 }
+inputs = ["plate"]
+
+[[nodes]]
+name = "flat"
+type = "subtract_background"
+params = { radius = 10 }
+inputs = ["smooth"]
+
+# Step 3, segmentation: Otsu foreground, LoG seeds, marker-controlled watershed.
+[[nodes]]
+name = "foreground"
+type = "otsu"
+inputs = ["flat"]
+
+[[nodes]]
+name = "seeds"
+type = "log_seeds"
+params = { sigma = 3.0, min_distance = 5, min_response = 0.0 }
+inputs = ["flat"]
+
+[[nodes]]
+name = "watershed"
+type = "watershed"
+inputs = ["flat", "seeds", "foreground"]
+
+[[nodes]]
+name = "cells"
+type = "filter_objects"
+params = { min_area = 10, remove_border = true }
+inputs = ["watershed"]
+
+# Step 4, feature extraction: one row per cell.
+[[nodes]]
+name = "features"
+type = "measure"
+inputs = ["cells", "flat"]
+
+# Step 5, statistics: z-score, PCA, then k-means on the phenotype features.
+[[nodes]]
+name = "selected"
+type = "frame_to_table"
+params = { columns = ["area", "mean", "integrated"] }
+inputs = ["features"]
+
+[[nodes]]
+name = "scaled"
+type = "normalize"
+params = { method = "zscore" }
+inputs = ["selected"]
+
+[[nodes]]
+name = "reduced"
+type = "pca"
+params = { components = 2 }
+inputs = ["scaled"]
+
+[[nodes]]
+name = "phenotype"
+type = "kmeans"
+params = { k = 2, seed = 1 }
+inputs = ["reduced"]
+
+# Step 6, export: the feature table and the phenotype label per cell.
+[[nodes]]
+name = "feature_csv"
+type = "write_frame_csv"
+params = { path = 'screen/features.csv' }
+inputs = ["features"]
+
+[[nodes]]
+name = "phenotype_csv"
+type = "write_labels_csv"
+params = { path = 'screen/phenotypes.csv' }
+inputs = ["phenotype"]

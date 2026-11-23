@@ -9,6 +9,12 @@ authors.workspace = true
 readme.workspace = true
 
 [dependencies]
+crossbeam.workspace = true
+tpt-bio-core.workspace = true
+tpt-bio-seq.workspace = true
+tpt-bio-vision.workspace = true
+serde.workspace = true
+toml.workspace = true
 rayon.workspace = true
 
 [lints]
