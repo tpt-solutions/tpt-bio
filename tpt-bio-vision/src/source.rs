@@ -42,7 +42,7 @@ pub trait ByteSource {
 }
 
 /// Checks that `offset + len` lies within a source of length `total`.
-fn check_range(offset: u64, len: usize, total: u64) -> io::Result<()> {
+pub(crate) fn check_range(offset: u64, len: usize, total: u64) -> io::Result<()> {
     let end = offset
         .checked_add(len as u64)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "range overflows u64"))?;
@@ -108,10 +108,8 @@ impl ByteSource for FileSource {
 
     fn read_exact_at(&self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
         check_range(offset, buf.len(), self.len)?;
-        let mut file = self
-            .file
-            .lock()
-            .map_err(|_| io::Error::other("file source lock poisoned"))?;
+        let mut file =
+            self.file.lock().map_err(|_| io::Error::other("file source lock poisoned"))?;
         file.seek(SeekFrom::Start(offset))?;
         file.read_exact(buf)
     }

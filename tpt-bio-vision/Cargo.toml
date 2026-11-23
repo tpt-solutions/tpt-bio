@@ -10,8 +10,16 @@ readme.workspace = true
 
 [dependencies]
 tpt-bio-core.workspace = true
+tpt-bio-seq.workspace = true
 tpt-crypto-hash.workspace = true
 tpt-simd.workspace = true
+image.workspace = true
+tiff.workspace = true
+ndarray.workspace = true
+quick-xml.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+flate2.workspace = true
 
 [lints]
 workspace = true
