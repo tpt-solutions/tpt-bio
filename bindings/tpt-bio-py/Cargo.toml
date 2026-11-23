@@ -1,0 +1,19 @@
+[package]
+name = "tpt-bio-py"
+description = "PyO3 bindings for tpt-bio (MIT)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "tpt_bio"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3.workspace = true
+tpt-bio-core.workspace = true
+
+[lints]
+workspace = true
