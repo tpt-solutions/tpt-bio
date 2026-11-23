@@ -1,0 +1,52 @@
+# cargo-deny policy for tpt-bio.
+#
+# Only MIT-compatible licenses are allowed. A dependency that is dual-licensed
+# `MIT OR Apache-2.0` passes through its MIT option. A crate that is Apache-2.0
+# only (no MIT option) is rejected, because the project must stay usable under
+# MIT alone. See docs/dependency-audit.md for the review record.
+
+[graph]
+all-features = true
+no-default-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []
+
+[licenses]
+version = 2
+# Every crate must declare a license. Undeclared licenses are not accepted.
+unused-allowed-license = "allow"
+confidence-threshold = 0.93
+allow = [
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+]
+# Dual-licensed `MIT OR Apache-2.0` crates are accepted through their MIT option.
+# Apache-2.0-only crates are rejected by omission from this list.
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+# Crates that link C code. The project is zero-FFI, so none may enter the tree.
+deny = [
+    { name = "openssl-sys" },
+    { name = "libz-sys" },
+    { name = "ring" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# Git sources that have been reviewed and pinned to a commit in Cargo.toml.
+allow-git = [
+    "https://github.com/tpt-solutions/tpt-crypto",
+    "https://github.com/tpt-solutions/target-lexicon-mit",
+]
