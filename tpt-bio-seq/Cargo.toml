@@ -1,0 +1,25 @@
+[package]
+name = "tpt-bio-seq"
+description = "Pure Rust sequencing I/O (FASTQ, BGZF, SAM, BAM, VCF, indexes) for tpt-bio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+readme.workspace = true
+
+[features]
+default = ["mmap"]
+# Memory-mapped file access (memmap2). The only module that uses `unsafe`.
+mmap = ["dep:memmap2"]
+
+[dependencies]
+tpt-bio-core.workspace = true
+flate2.workspace = true
+rayon.workspace = true
+crossbeam.workspace = true
+tpt-strata.workspace = true
+memmap2 = { workspace = true, optional = true }
+
+[lints]
+workspace = true
