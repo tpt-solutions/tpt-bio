@@ -73,6 +73,17 @@ pub fn canonical(kmer: u64, k: usize) -> u64 {
 /// Windows containing a non-ACGT byte are skipped. Call [`Kmers::canonical`] to
 /// yield the strand-independent form instead.
 #[derive(Debug, Clone)]
+///
+/// # Examples
+///
+/// ```
+/// use tpt_bio_core::kmer::Kmers;
+///
+/// // The N breaks the sequence, so only the windows AC, CG and GT are yielded.
+/// let kmers: Vec<(usize, u64)> = Kmers::new(b"ACGTN", 2).unwrap().collect();
+/// assert_eq!(kmers.len(), 3);
+/// assert_eq!(kmers[0], (0, 0b0001)); // AC
+/// ```
 pub struct Kmers<'a> {
     seq: &'a [u8],
     k: usize,

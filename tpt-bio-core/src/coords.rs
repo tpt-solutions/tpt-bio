@@ -11,6 +11,18 @@ use crate::error::RegionParseError;
 
 /// A 0-based, half-open interval `[start, end)` on one contig.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// # Examples
+///
+/// ```
+/// use tpt_bio_core::coords::Interval;
+///
+/// // 1-based inclusive 1..=10 is stored as the 0-based half-open [0, 10).
+/// let iv = Interval::from_one_based_inclusive(1, 10).unwrap();
+/// assert_eq!((iv.start(), iv.end(), iv.len()), (0, 10, 10));
+/// assert!(iv.contains(0));
+/// assert!(!iv.contains(10));
+/// ```
 pub struct Interval {
     start: u64,
     end: u64,
@@ -63,7 +75,7 @@ impl Interval {
     /// Whether two intervals share at least one position.
     #[must_use]
     pub const fn overlaps(&self, other: &Self) -> bool {
-        self.start < other.end && other.start < self.end
+        !self.is_empty() && !other.is_empty() && self.start < other.end && other.start < self.end
     }
 
     /// The shared part of two intervals, if any.
@@ -77,6 +89,16 @@ impl Interval {
 
 /// A contig name plus an optional interval. `None` means the whole contig.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// # Examples
+///
+/// ```
+/// use tpt_bio_core::coords::Region;
+///
+/// let r = Region::parse("chr1:1,000-2000").unwrap();
+/// assert_eq!(r.contig(), "chr1");
+/// assert_eq!(r.interval().unwrap().start(), 999);
+/// ```
 pub struct Region {
     contig: String,
     interval: Option<Interval>,

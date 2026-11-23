@@ -10,6 +10,16 @@ use crate::error::InvalidSymbol;
 /// One of the four unambiguous DNA bases, with its 2-bit code (A=0, C=1, G=2, T=3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
+///
+/// # Examples
+///
+/// ```
+/// use tpt_bio_core::nucleotide::Base;
+///
+/// assert_eq!(Base::from_ascii(b'g'), Some(Base::G));
+/// assert_eq!(Base::G.complement(), Base::C);
+/// assert_eq!(Base::T.to_2bit(), 3);
+/// ```
 pub enum Base {
     /// Adenine.
     A = 0,
@@ -73,6 +83,17 @@ impl Base {
 /// Full IUPAC nucleotide code, with the BAM 4-bit encoding as the discriminant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
+///
+/// # Examples
+///
+/// ```
+/// use tpt_bio_core::nucleotide::Iupac;
+///
+/// let n = Iupac::from_ascii(b'N').unwrap();
+/// assert_eq!(n.to_ascii(), b'N');
+/// assert_eq!(n.to_base(), None);
+/// assert_eq!(Iupac::from_ascii(b'R').unwrap().complement().to_ascii(), b'Y');
+/// ```
 pub enum Iupac {
     /// `=`: identical to the reference (BAM only).
     Eq = 0,

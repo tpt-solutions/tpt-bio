@@ -10,6 +10,17 @@ pub const MAX_Q: u8 = 93;
 
 /// A Phred-scaled quality score in `0..=93`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// # Examples
+///
+/// ```
+/// use tpt_bio_core::quality::Phred;
+///
+/// // 'I' is ASCII 73, so Phred+33 gives Q40.
+/// let q = Phred::from_phred33(b'I').unwrap();
+/// assert_eq!(q.value(), 40);
+/// assert!((q.error_probability() - 1e-4).abs() < 1e-12);
+/// ```
 pub struct Phred(u8);
 
 impl Phred {

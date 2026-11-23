@@ -88,6 +88,17 @@ impl AminoAcid {
 
 /// Maps a codon to an amino acid. Built from a 64-entry table in TCAG order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// # Examples
+///
+/// ```
+/// use tpt_bio_core::{AminoAcid, CodonTable};
+/// use tpt_bio_core::nucleotide::Base;
+///
+/// let table = CodonTable::standard();
+/// assert_eq!(table.translate([Base::A, Base::T, Base::G]), AminoAcid::Met);
+/// assert_eq!(table.translate_ascii(b"TAA"), Some(AminoAcid::Stop));
+/// ```
 pub struct CodonTable {
     table: [u8; 64],
 }

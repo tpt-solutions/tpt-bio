@@ -11,7 +11,7 @@ readme.workspace = true
 [features]
 default = ["std"]
 # Enables std-only helpers such as rayon-based parallel iterators.
-# Poisson and Binomial distributions need tpt-math, which requires `std`.
+# Binomial distributions need tpt-math, which requires `std`. Poisson does not.
 std = ["dep:rayon", "dep:tpt-math-prob-dist"]
 
 [dependencies]
@@ -21,3 +21,6 @@ rayon = { workspace = true, optional = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
