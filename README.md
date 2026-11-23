@@ -29,7 +29,7 @@ tptbio seq view reads.bam -r chr1:1000-2000 # region query (1-based, inclusive)
 
 ## Build
 
-The workspace pins Rust 1.85 through `rust-toolchain.toml`.
+The workspace pins Rust 1.95 through `rust-toolchain.toml`.
 
 ```sh
 cargo build --workspace
