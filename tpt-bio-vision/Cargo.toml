@@ -1,0 +1,17 @@
+[package]
+name = "tpt-bio-vision"
+description = "Biological image I/O, segmentation and feature extraction for tpt-bio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+readme.workspace = true
+
+[dependencies]
+tpt-bio-core.workspace = true
+tpt-crypto-hash.workspace = true
+tpt-simd.workspace = true
+
+[lints]
+workspace = true
