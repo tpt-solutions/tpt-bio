@@ -54,3 +54,31 @@ path = "fuzz_targets/bai_read.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "vcf_read"
+path = "fuzz_targets/vcf_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "bcf_read"
+path = "fuzz_targets/bcf_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tabix_read"
+path = "fuzz_targets/tabix_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fasta_fai"
+path = "fuzz_targets/fasta_fai.rs"
+test = false
+doc = false
+bench = false
