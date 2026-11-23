@@ -6,7 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-readme.workspace = true
+readme = "README.md"
+keywords = ["bioinformatics", "statistics", "no-std", "genomics", "bio-math"]
+categories = ["science", "no-std", "algorithms"]
 
 [features]
 default = ["std"]

@@ -6,7 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-readme.workspace = true
+readme = "README.md"
+keywords = ["bioinformatics", "sequencing", "bam", "vcf", "cram"]
+categories = ["science", "parser-implementations", "encoding"]
 
 [features]
 default = ["mmap"]

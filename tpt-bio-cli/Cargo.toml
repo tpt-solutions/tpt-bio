@@ -6,7 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-readme.workspace = true
+readme = "README.md"
+keywords = ["bioinformatics", "cli", "bam", "vcf", "imaging"]
+categories = ["command-line-utilities", "science"]
 
 [[bin]]
 name = "tptbio"
