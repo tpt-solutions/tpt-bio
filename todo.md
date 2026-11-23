@@ -12,115 +12,120 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - CellProfiler parity is functional only (no .cppipe import)
 - CI is GitHub Actions; Python wheels are built with maturin
 
+**Open decisions** (what is still open after the 2026-11-24 review)
+- **Poisson:** recommendation is to reimplement the PMF and CDF on `libm` (`lgamma`, incomplete gamma and beta) so the distributions work in `no_std`. Keep `tpt-math-prob-dist` as a dev-dependency oracle in tests. Waiting for a decision.
+- **Crates.io publishing:** `tpt-crypto` and `target-lexicon-mit` are git pins, and crates.io rejects git dependencies. Phase 6 needs published versions or vendored copies.
+- **TLS for remote I/O:** `tpt-crypto` covers SHA-256 and HMAC but not a TLS client. `tpt-crypto-rustls` is unaudited. Decide before Phase 3 HTTPS.
+
 ---
 
 ## Phase 0: Project Foundations
 
 ### Repo & licensing
-- [ ] `git init`, `.gitignore`, default branch `master`
-- [ ] `LICENSE-MIT` (© 2026 TPT Solutions)
-- [ ] `LICENSE-APACHE` (© 2026 TPT Solutions)
-- [ ] License headers / `license = "MIT OR Apache-2.0"` in every Cargo.toml
-- [ ] `README.md` (overview, license section, "MIT-first" dependency policy)
-- [ ] `CONTRIBUTING.md` (dual-license contribution clause, dependency policy)
-- [ ] `SECURITY.md`, `CODE_OF_CONDUCT.md`
-- [ ] `CHANGELOG.md`
+- [x] `git init`, `.gitignore`, default branch `master`
+- [x] `LICENSE-MIT` (© 2026 TPT Solutions)
+- [x] `LICENSE-APACHE` (© 2026 TPT Solutions)
+- [x] License headers / `license = "MIT OR Apache-2.0"` in every Cargo.toml _(Cargo `license` field set for every crate; per-file headers not added)_
+- [x] `README.md` (overview, license section, "MIT-first" dependency policy)
+- [x] `CONTRIBUTING.md` (dual-license contribution clause, dependency policy)
+- [x] `SECURITY.md`, `CODE_OF_CONDUCT.md`
+- [x] `CHANGELOG.md`
 
 ### Workspace scaffold
-- [ ] Root `Cargo.toml` workspace (shared `[workspace.package]`, `[workspace.dependencies]`, lints)
-- [ ] `rust-toolchain.toml` and pinned MSRV
-- [ ] `rustfmt.toml`, `clippy.toml`
-- [ ] Scaffold `tpt-bio-core` (`#![no_std]` + `alloc`)
-- [ ] Scaffold `tpt-bio-seq`
-- [ ] Scaffold `tpt-bio-vision`
-- [ ] Scaffold `tpt-bio-pipeline`
-- [ ] Scaffold `tpt-bio-cli` (binary `tptbio`)
-- [ ] Scaffold `bindings/tpt-bio-py` (PyO3 + maturin `pyproject.toml`)
-- [ ] Confirm tpt-math and tpt-simd versions on crates.io and their licenses/features (including `no_std` support)
-- [ ] `unsafe` policy: `#![forbid(unsafe_code)]` where possible; document and isolate any exceptions (mmap, SIMD)
+- [x] Root `Cargo.toml` workspace (shared `[workspace.package]`, `[workspace.dependencies]`, lints)
+- [x] `rust-toolchain.toml` and pinned MSRV
+- [x] `rustfmt.toml`, `clippy.toml`
+- [x] Scaffold `tpt-bio-core` (`#![no_std]` + `alloc`)
+- [x] Scaffold `tpt-bio-seq`
+- [x] Scaffold `tpt-bio-vision` _(empty crate; no code yet)_
+- [x] Scaffold `tpt-bio-pipeline` _(contains the DAG model)_
+- [x] Scaffold `tpt-bio-cli` (binary `tptbio`)
+- [x] Scaffold `bindings/tpt-bio-py` (PyO3 + maturin `pyproject.toml`) _(separate workspace; see open decision on pyo3)_
+- [ ] Confirm tpt-math and tpt-simd versions and licenses (including `no_std` support) _(tpt-simd 0.1.1 is adopted and needs Rust 1.95, which is now the MSRV; its `no_std` features are not verified)_
+- [x] `unsafe` policy: `#![forbid(unsafe_code)]` where possible; document and isolate any exceptions (mmap, SIMD)
 
 ### Dependency license audit
-- [ ] Verify license expression of each planned dependency: tpt-math, tpt-simd, tpt-crypto, num-traits, flate2 (+ miniz_oxide), memmap2, rayon, crossbeam, image, tiff, ndarray, clap, pyo3, wgpu, ureq, serde/toml
-- [ ] Reject or replace anything Apache-2.0-only, MPL, or copyleft (including transitive)
-- [ ] Use `tpt-crypto` instead of `ring` for all crypto needs (SigV4 HMAC/SHA-256, HTTPS/TLS client, checksums); drop the `ring` clarify block from `deny.toml`
-- [ ] Verify tpt-crypto's license, `no_std` support and crates.io version; make sure the HTTP client's TLS stack can use it (or document the gap)
-- [ ] Record the audit result in `docs/dependency-audit.md`
+- [x] Verify license expression of each planned dependency: tpt-math, tpt-simd, tpt-crypto, num-traits, flate2 (+ miniz_oxide), memmap2, rayon, crossbeam, image, tiff, ndarray, clap, pyo3, wgpu, ureq, serde/toml _(see docs/dependency-audit.md)_
+- [x] Reject or replace anything Apache-2.0-only, MPL, or copyleft (including transitive) _(arrow/parquet rejected; target-lexicon via pyo3 awaits a decision)_
+- [ ] Use `tpt-crypto` instead of `ring` for all crypto needs (SigV4 HMAC/SHA-256, HTTPS/TLS client, checksums); drop the `ring` clarify block from `deny.toml` _(SigV4 uses `tpt-crypto-hash`, pinned to a git commit; TLS is still open)_
+- [x] Verify tpt-crypto's license, `no_std` support and crates.io version; make sure the HTTP client's TLS stack can use it (or document the gap) _(MIT OR Apache-2.0, `tpt-crypto-hash` is `no_std`; not on crates.io, so it is pinned to a git commit; TLS not covered)_
+- [x] Record the audit result in `docs/dependency-audit.md`
 
 ### cargo-deny & CI
-- [ ] `deny.toml` with the corrected policy (MIT-option expressions only, copyleft denied, advisories, bans, sources)
-- [ ] Verify `cargo deny check` fails on a deliberately Apache-only test crate, then remove it
-- [ ] GitHub Actions: fmt, clippy `-D warnings`, test on Linux/macOS/Windows
-- [ ] CI: `cargo deny check`
-- [ ] CI: `no_std` build of `tpt-bio-core` (e.g. `thumbv7em-none-eabihf`)
-- [ ] CI: MSRV job
-- [ ] CI: docs build (`cargo doc`, deny warnings)
-- [ ] CI: dependency caching and nightly scheduled run
-- [ ] Dependabot / Renovate config
+- [x] `deny.toml` with the corrected policy (MIT-option expressions only, copyleft denied, advisories, bans, sources)
+- [x] Verify `cargo deny check` fails on a deliberately Apache-only test crate, then remove it _(verified with a temporary path crate, since removed)_
+- [x] GitHub Actions: fmt, clippy `-D warnings`, test on Linux/macOS/Windows _(workflow written; not yet run on GitHub)_
+- [x] CI: `cargo deny check`
+- [x] CI: `no_std` build of `tpt-bio-core` (e.g. `thumbv7em-none-eabihf`)
+- [x] CI: MSRV job
+- [x] CI: docs build (`cargo doc`, deny warnings)
+- [x] CI: dependency caching and nightly scheduled run
+- [x] Dependabot / Renovate config _(Dependabot)_
 
 ### Test data & tooling
-- [ ] Choose permissively-licensed test data (small BAM/CRAM/VCF/FASTQ, OME-TIFF, Zarr)
-- [ ] Set up `criterion` (check license) or a custom benchmark harness
-- [ ] Set up `cargo-fuzz` infrastructure
-- [ ] Install samtools/bcftools locally for oracle comparisons (test-only, never linked)
+- [ ] Choose permissively-licensed test data (small BAM/CRAM/VCF/FASTQ, OME-TIFF, Zarr) _(tests are self-contained with generated data; external fixtures not chosen, see docs/test-data.md)_
+- [ ] Set up `criterion` (check license) or a custom benchmark harness _(not added yet)_
+- [x] Set up `cargo-fuzz` infrastructure _(fuzz/ builds; targets not yet run under libFuzzer)_
+- [ ] Install samtools/bcftools locally for oracle comparisons (test-only, never linked) _(BLOCKED: not installed on this machine)_
 
 ---
 
 ## Phase 1: Sequence Core (`tpt-bio-core` + `tpt-bio-seq` basics)
 
 ### tpt-bio-core (`no_std` + alloc)
-- [ ] Nucleotide types (DNA/RNA, IUPAC codes, 2-bit and 4-bit encodings)
-- [ ] Amino acid type and codon table
-- [ ] Phred quality score type and conversions
-- [ ] Genomic coordinate / region types (0-based vs 1-based clarity)
-- [ ] Reverse complement, k-mer iteration
-- [ ] Poisson distribution (PMF, CDF, quantile) via tpt-math
-- [ ] Binomial distribution (PMF, CDF, quantile) via tpt-math
-- [ ] Basic bio-math (GC content, entropy, etc.)
-- [ ] Parallel iterator helpers (`std` feature, rayon-based)
-- [ ] `no_std` and `std` feature matrix, tested in CI
-- [ ] Unit and property tests; rustdoc with examples
+- [x] Nucleotide types (DNA/RNA, IUPAC codes, 2-bit and 4-bit encodings)
+- [x] Amino acid type and codon table
+- [x] Phred quality score type and conversions
+- [x] Genomic coordinate / region types (0-based vs 1-based clarity)
+- [x] Reverse complement, k-mer iteration
+- [x] Poisson distribution (PMF, CDF, quantile) via tpt-math _(PMF, CDF, quantile; requires the std feature)_
+- [x] Binomial distribution (PMF, CDF, quantile) via tpt-math _(PMF, CDF, quantile (quantile by linear search); requires the std feature)_
+- [x] Basic bio-math (GC content, entropy, etc.)
+- [x] Parallel iterator helpers (`std` feature, rayon-based)
+- [x] `no_std` and `std` feature matrix, tested in CI
+- [ ] Unit and property tests; rustdoc with examples _(unit tests and doctests in place; property-based tests not yet added)_
 
 ### BGZF (flate2, pure Rust)
-- [ ] BGZF block reader (header, extra field, CRC32, ISIZE validation)
-- [ ] EOF marker handling
-- [ ] Parallel block decompression (rayon/crossbeam)
-- [ ] BGZF writer with parallel block compression
-- [ ] Virtual file offsets (block offset + uncompressed offset)
-- [ ] Seek by virtual offset
-- [ ] Mmap-backed reader (memmap2)
-- [ ] Corruption and truncation tests, fuzz target
+- [x] BGZF block reader (header, extra field, CRC32, ISIZE validation)
+- [x] EOF marker handling
+- [x] Parallel block decompression (rayon/crossbeam)
+- [x] BGZF writer with parallel block compression _(parallel via compress_parallel; the streaming writer is sequential)_
+- [x] Virtual file offsets (block offset + uncompressed offset)
+- [x] Seek by virtual offset
+- [x] Mmap-backed reader (memmap2)
+- [x] Corruption and truncation tests, fuzz target
 
 ### FASTQ
-- [ ] Zero-copy FASTQ record parser
-- [ ] Gzip / BGZF FASTQ input
-- [ ] Paired-end / interleaved handling
-- [ ] FASTQ writer
-- [ ] Streaming parallel batch reader
-- [ ] Tests and fuzz target
+- [x] Zero-copy FASTQ record parser
+- [x] Gzip / BGZF FASTQ input
+- [x] Paired-end / interleaved handling
+- [x] FASTQ writer
+- [x] Streaming parallel batch reader _(bounded-channel reader thread; per-batch work via rayon)_
+- [x] Tests and fuzz target
 
 ### SAM / BAM
-- [ ] SAM header parser (@HD, @SQ, @RG, @PG, @CO)
-- [ ] SAM record parser (text) and writer
-- [ ] BAM header and reference dictionary
-- [ ] Zero-copy BAM record view (cigar, seq, qual, aux tags)
-- [ ] CIGAR operations and alignment-end calculation
-- [ ] Auxiliary tag parsing (all types, arrays)
-- [ ] BAM writer
-- [ ] SAM <-> BAM round-trip tests
-- [ ] Conformance tests vs samtools and noodles outputs
+- [ ] SAM header parser (@HD, @SQ, @RG, @PG, @CO) _(@SQ is parsed; other header lines are kept as text, without structured accessors)_
+- [x] SAM record parser (text) and writer
+- [x] BAM header and reference dictionary
+- [x] Zero-copy BAM record view (cigar, seq, qual, aux tags)
+- [x] CIGAR operations and alignment-end calculation
+- [x] Auxiliary tag parsing (all types, arrays)
+- [x] BAM writer
+- [x] SAM <-> BAM round-trip tests
+- [ ] Conformance tests vs samtools and noodles outputs _(BLOCKED: samtools not installed; noodles not used)_
 
 ### BAI index & random access
-- [ ] BAI parser (bins, chunks, linear index)
-- [ ] Region -> chunk query (O(log N))
-- [ ] BAI builder (`index` from a coordinate-sorted BAM)
-- [ ] Region query API (`reader.query("chr1:1000-2000")`)
-- [ ] Tests vs samtools-generated indexes
+- [x] BAI parser (bins, chunks, linear index)
+- [x] Region -> chunk query (O(log N))
+- [x] BAI builder (`index` from a coordinate-sorted BAM)
+- [x] Region query API (`reader.query("chr1:1000-2000")`) _(fetch() takes a reference ID and coordinates; no string API)_
+- [ ] Tests vs samtools-generated indexes _(BLOCKED: samtools not installed)_
 
 ### CLI (minimal) & milestone
-- [ ] `tptbio seq view` (BAM/SAM, region, header-only, format output)
-- [ ] `tptbio seq index`
-- [ ] Benchmark suite vs samtools (view, index, region query) on a human-genome-scale BAM
-- [ ] **Milestone:** `tptbio seq view` reads and indexes a standard human genome BAM faster than samtools
+- [x] `tptbio seq view` (BAM/SAM, region, header-only, format output)
+- [x] `tptbio seq index`
+- [ ] Benchmark suite vs samtools (view, index, region query) on a human-genome-scale BAM _(BLOCKED: samtools not installed; no benchmark harness yet)_
+- [ ] **Milestone:** `tptbio seq view` reads and indexes a standard human genome BAM faster than samtools _(not measured; see benchmark item)_
 
 ---
 
@@ -152,10 +157,10 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [ ] Conformance tests vs samtools
 
 ### FASTA / misc
-- [ ] FASTA reader/writer and `.fai` index
-- [ ] Sorting utilities (coordinate / name sort)
-- [ ] Merge of sorted BAMs
-- [ ] Basic stats (flagstat-like)
+- [x] FASTA reader/writer and `.fai` index
+- [x] Sorting utilities (coordinate / name sort)
+- [x] Merge of sorted BAMs _(merge over record streams, so any sorted source works)_
+- [x] Basic stats (flagstat-like)
 
 ### Hardening
 - [ ] Fuzz targets for BGZF, BAM, VCF, BCF, CRAM, indexes
@@ -169,7 +174,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 ### Storage / I/O
 - [ ] `ByteSource` trait (local file, mmap, in-memory, HTTP)
 - [ ] HTTP range-read backend (permissive client, retry, caching)
-- [ ] Own S3 SigV4 request signer (no AWS SDK)
+- [x] Own S3 SigV4 request signer (no AWS SDK) _(signer only; checked against the AWS ListUsers example vector)_
 - [ ] Presigned-URL and public-bucket support
 - [ ] Block cache for remote reads
 
@@ -183,9 +188,9 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [ ] Image writer (OME-TIFF and/or Zarr) for results and masks
 
 ### SIMD image processing (tpt-simd)
-- [ ] 2D convolution kernel (separable and non-separable)
+- [ ] 2D convolution kernel (separable and non-separable) _(separable done via `tpt-simd`; non-separable not started)_
 - [ ] 3D convolution kernel (ADR-002)
-- [ ] Gaussian blur (2D/3D)
+- [ ] Gaussian blur (2D/3D) _(2D done via the separable kernel; 3D not started)_
 - [ ] Background subtraction (rolling ball / morphological)
 - [ ] Median / mean filters
 - [ ] Edge detection (Sobel, Scharr, Canny)
@@ -212,7 +217,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [ ] Colocalization and correlation features
 - [ ] Reach 500+ features; document the list vs CellProfiler equivalents
 - [ ] Numerical parity tests vs CellProfiler outputs (test-only, tolerance-based)
-- [ ] Tabular export (CSV, Parquet or Arrow: license check first)
+- [x] Tabular export: CSV and JSON Lines through `tpt-strata` and `tptbio seq export`. Parquet is out of scope, so Arrow is not used.
 
 ### CLI & milestone
 - [ ] `tptbio vision segment`
@@ -247,12 +252,12 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 ## Phase 5: Integration, CLI, Python
 
 ### tpt-bio-pipeline
-- [ ] DAG model (nodes, typed ports, edges, cycle detection)
-- [ ] Streaming executor with bounded channels and backpressure (crossbeam)
-- [ ] Parallel node execution (rayon)
+- [ ] DAG model (nodes, typed ports, edges, cycle detection) _(nodes, edges and cycle detection done; typed ports not implemented)_
+- [ ] Streaming executor with bounded channels and backpressure (crossbeam) _(not implemented; the executor is in-memory)_
+- [x] Parallel node execution (rayon) _(level-parallel execution)_
 - [ ] Built-in nodes: seq readers/writers/filters, vision load/filter/segment/features, stats
 - [ ] Pipeline definition format (TOML/YAML) + validation (license check for serde crates)
-- [ ] Error handling, cancellation, progress reporting
+- [ ] Error handling, cancellation, progress reporting _(errors and cancellation done; progress reporting not)_
 - [ ] Checkpointing / resume
 - [ ] End-to-end example: high-content screening flow (spec section 7, steps 1-6)
 - [ ] Integration tests across seq + vision nodes
@@ -270,10 +275,10 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [ ] Bindings for vision (load, segment, features)
 - [ ] NumPy interop (zero-copy where possible; check numpy crate license)
 - [ ] Bindings for pipeline execution
-- [ ] Type stubs (`.pyi`), docstrings
-- [ ] Release the GIL during heavy work
-- [ ] Python tests (pytest)
-- [ ] Wheels for Linux (manylinux), macOS (x86_64 + arm64), Windows via maturin in CI
+- [x] Type stubs (`.pyi`), docstrings
+- [x] Release the GIL during heavy work _(sequence utilities only)_
+- [x] Python tests (pytest) _(5 tests, run against a locally built module)_
+- [ ] Wheels for Linux (manylinux), macOS (x86_64 + arm64), Windows via maturin in CI _(maturin not run in CI yet)_
 - [ ] Jupyter notebook example: results from the spec section 7 flow
 
 ---
