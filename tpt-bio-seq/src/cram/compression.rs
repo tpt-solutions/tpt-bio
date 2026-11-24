@@ -289,9 +289,12 @@ pub fn parse(data: &[u8]) -> Result<CompressionHeader> {
     let n = m.itf8()?;
     let mut tags = Vec::new();
     for _ in 0..n {
-        let key = m.bytes(3)?;
+        // The key is one ITF8 integer packing the tag name and type: name0 << 16 |
+        // name1 << 8 | type. samtools writes it this way.
+        let packed = m.itf8()? as u32;
+        let key = [(packed >> 16) as u8, (packed >> 8) as u8, packed as u8];
         let enc = read_encoding(&mut m)?;
-        tags.push(([key[0], key[1], key[2]], enc));
+        tags.push((key, enc));
     }
     Ok(CompressionHeader { preservation, data_series, tags })
 }
@@ -398,9 +401,12 @@ pub fn write(h: &CompressionHeader) -> Vec<u8> {
         .tags
         .iter()
         .map(|(k, enc)| {
+            let packed = (i32::from(k[0]) << 16) | (i32::from(k[1]) << 8) | i32::from(k[2]);
+            let mut key = Vec::new();
+            put_itf8(&mut key, packed);
             let mut v = Vec::new();
             write_encoding(enc, &mut v);
-            (k.to_vec(), v)
+            (key, v)
         })
         .collect();
     write_map(&tags, &mut out);

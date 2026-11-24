@@ -63,7 +63,12 @@ pub(crate) struct Table {
 }
 
 impl Table {
-    /// Builds the lookup for a table whose frequencies sum to 4096 or are all zero.
+    /// Builds the lookup for a table whose frequencies sum to 4096, or to 4095.
+    ///
+    /// A sum of 4095 is written by older htscodecs encoders. The reference decoder
+    /// fills the last slot with the symbol before it, so the last non-empty symbol
+    /// also owns slot 4095. The symbol's frequency is unchanged, so the state update
+    /// is the same as the reference's.
     pub(crate) fn new(freq: &[u32; 256]) -> Self {
         let freq = *freq;
         let mut cum = [0u32; 257];
@@ -75,6 +80,10 @@ impl Table {
             for slot in cum[s]..cum[s + 1] {
                 lookup[slot as usize] = s as u8;
             }
+        }
+        if let Some(last) = (0..256).rev().find(|&s| freq[s] > 0).filter(|_| cum[256] == TOTAL - 1)
+        {
+            lookup[(TOTAL - 1) as usize] = last as u8;
         }
         Self { freq, cum, lookup }
     }
@@ -177,7 +186,9 @@ pub(crate) fn read_table_with(
         Ok(())
     })?;
     let sum: u32 = freq.iter().sum();
-    if sum != TOTAL && !(sum == 0 && allow_empty) {
+    // 4095 is accepted: see `Table::new`.
+    let ok = sum == TOTAL || sum == TOTAL - 1 || (sum == 0 && allow_empty);
+    if !ok {
         return Err(SeqError::malformed(FORMAT, format!("frequencies sum to {sum}, not 4096")));
     }
     Ok(Table::new(&freq))
@@ -216,7 +227,12 @@ fn decode_o1(body: &[u8], raw_len: usize) -> Result<Vec<u8>> {
     let mut cur = Cursor::new(body);
     let mut tables: Vec<Option<Box<Table>>> = (0..256).map(|_| None).collect();
     walk_symbols(&mut cur, |c, ctx| {
-        let table = read_table(c, raw_len == 0)?;
+        // In an order-1 table a frequency of 0 stands for 4096: a context that
+        // only ever has one symbol. The reference decoder does the same.
+        let table = read_table_with(c, raw_len == 0, |c| {
+            let f = read_freq(c)?;
+            Ok(if f == 0 { TOTAL } else { f })
+        })?;
         tables[usize::from(ctx)] = Some(Box::new(table));
         Ok(())
     })?;

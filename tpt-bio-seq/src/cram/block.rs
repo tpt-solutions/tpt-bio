@@ -166,7 +166,7 @@ pub fn write_block(
             enc.finish()?
         }
         Method::Rans4x8 => rans::encode_o0(raw),
-        Method::RansNx16 => rans_nx16::encode(raw, false, false),
+        Method::RansNx16 => rans_nx16::encode(raw),
         Method::Bzip2 | Method::Lzma => {
             return Err(SeqError::Unsupported("writing bzip2 or LZMA blocks".into()));
         }
@@ -229,11 +229,8 @@ mod tests {
         let o1 = frame_block(4, &rans::encode_o1(data), data.len());
         let block = read_block(&mut Cursor::new(&o1)).unwrap();
         assert_eq!(block.data, data);
-        for states32 in [false, true] {
-            let nx = frame_block(5, &rans_nx16::encode(data, true, states32), data.len());
-            let block = read_block(&mut Cursor::new(&nx)).unwrap();
-            assert_eq!(block.data, data);
-        }
+        let nx = frame_block(5, &rans_nx16::encode(data), data.len());
+        assert_eq!(read_block(&mut Cursor::new(&nx)).unwrap().data, data);
         let mut buf = Vec::new();
         write_block(Method::RansNx16, content::CORE_DATA, 0, data, &mut buf).unwrap();
         assert_eq!(read_block(&mut Cursor::new(&buf)).unwrap().data, data);
