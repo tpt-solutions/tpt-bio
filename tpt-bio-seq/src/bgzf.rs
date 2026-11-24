@@ -8,6 +8,7 @@
 //! an offset inside its decompressed payload (lower 16 bits). It is the position
 //! format used by BAI, CSI and TBI indexes.
 
+use std::collections::VecDeque;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
 /// Reads exactly `len` bytes into a new vector.
@@ -150,7 +151,27 @@ pub struct BgzfReader<R> {
     block_start: u64,
     next_start: u64,
     last_block_was_eof: bool,
+    /// Compressed input read ahead but not yet split into whole blocks.
+    raw: Vec<u8>,
+    /// File offset of `raw[0]`.
+    raw_start: u64,
+    /// Blocks inflated ahead of the reader, in file order.
+    ready: VecDeque<ReadyBlock>,
 }
+
+/// A block that has been inflated ahead of use.
+#[derive(Debug)]
+struct ReadyBlock {
+    /// File offset of the block.
+    start: u64,
+    /// Compressed size of the block.
+    size: u64,
+    /// The inflated bytes.
+    data: Vec<u8>,
+}
+
+/// Compressed bytes read ahead per batch. Blocks in a batch inflate in parallel.
+const READ_AHEAD_BYTES: usize = 4 << 20;
 
 impl<R: Read> BgzfReader<R> {
     /// Wraps a reader positioned at the start of a BGZF stream.
@@ -162,42 +183,59 @@ impl<R: Read> BgzfReader<R> {
             block_start: 0,
             next_start: 0,
             last_block_was_eof: false,
+            raw: Vec::new(),
+            raw_start: 0,
+            ready: VecDeque::new(),
         }
+    }
+
+    /// Reads ahead a batch of compressed blocks and inflates them in parallel.
+    /// Returns `false` when the input has ended and nothing is left.
+    fn refill(&mut self) -> Result<bool> {
+        let mut eof = false;
+        while self.raw.len() < READ_AHEAD_BYTES && !eof {
+            let old = self.raw.len();
+            self.raw.resize(old + (1 << 16), 0);
+            let n = self.inner.read(&mut self.raw[old..])?;
+            self.raw.truncate(old + n);
+            eof = n == 0;
+        }
+        let spans = complete_block_spans(&self.raw)?;
+        let complete: usize = spans.last().map_or(0, |s| s.start + s.size);
+        if complete == 0 {
+            if self.raw.is_empty() {
+                return Ok(false);
+            }
+            return Err(SeqError::malformed_at("BGZF", self.raw_start, "truncated block"));
+        }
+        let raw = &self.raw;
+        let inflated: Vec<Result<Vec<u8>>> = spans
+            .par_iter()
+            .map(|span| inflate_span(&raw[span.start..span.start + span.size]))
+            .collect();
+        let mut addr = self.raw_start;
+        for (span, data) in spans.iter().zip(inflated) {
+            self.ready.push_back(ReadyBlock { start: addr, size: span.size as u64, data: data? });
+            addr += span.size as u64;
+        }
+        self.raw.drain(..complete);
+        self.raw_start += complete as u64;
+        if eof && !self.raw.is_empty() {
+            return Err(SeqError::malformed_at("BGZF", self.raw_start, "truncated block"));
+        }
+        Ok(true)
     }
 
     /// Reads and decodes the next block. Returns `false` at a clean end of stream.
     fn load_next_block(&mut self) -> Result<bool> {
-        let mut fixed = [0u8; FIXED_HEADER_LEN];
-        match read_exact_or_eof(&mut self.inner, &mut fixed)? {
-            0 => return Ok(false),
-            n if n < FIXED_HEADER_LEN => {
-                return Err(SeqError::malformed_at(
-                    "BGZF",
-                    self.next_start,
-                    "truncated block header",
-                ));
-            }
-            _ => {}
+        if self.ready.is_empty() && !self.refill()? {
+            return Ok(false);
         }
-        let xlen = check_fixed_header(&fixed)?;
-        let mut extra = vec![0u8; xlen];
-        self.inner.read_exact(&mut extra).map_err(|e| truncated(e, self.next_start))?;
-        let size = block_size_from_extra(&extra).ok_or_else(|| {
-            SeqError::malformed_at("BGZF", self.next_start, "missing BC subfield")
-        })?;
-        let consumed = FIXED_HEADER_LEN + xlen;
-        if size < consumed + FOOTER_LEN || size > MAX_BLOCK_SIZE {
-            return Err(SeqError::malformed_at("BGZF", self.next_start, "invalid block size"));
-        }
-        let mut rest = vec![0u8; size - consumed];
-        self.inner.read_exact(&mut rest).map_err(|e| truncated(e, self.next_start))?;
-        let (cdata, footer) = rest.split_at(rest.len() - FOOTER_LEN);
-        let crc = u32::from_le_bytes([footer[0], footer[1], footer[2], footer[3]]);
-        let isize = u32::from_le_bytes([footer[4], footer[5], footer[6], footer[7]]);
-        self.buf = inflate_block(cdata, crc, isize)?;
+        let Some(block) = self.ready.pop_front() else { return Ok(false) };
+        self.buf = block.data;
         self.pos = 0;
-        self.block_start = self.next_start;
-        self.next_start += size as u64;
+        self.block_start = block.start;
+        self.next_start = block.start + block.size;
         self.last_block_was_eof = self.buf.is_empty();
         Ok(true)
     }
@@ -238,6 +276,9 @@ impl<R: Read + Seek> BgzfReader<R> {
         self.buf.clear();
         self.pos = 0;
         self.next_start = coffset;
+        self.raw.clear();
+        self.raw_start = coffset;
+        self.ready.clear();
         if voffset.uncompressed_offset() == 0 {
             return Ok(());
         }
@@ -275,23 +316,39 @@ impl<R: Read> Read for BgzfReader<R> {
 
 /// Reads up to `buf.len()` bytes, returning how many were read. Unlike
 /// `read_exact`, a short read is not an error.
-fn read_exact_or_eof<R: Read>(r: &mut R, buf: &mut [u8]) -> io::Result<usize> {
-    let mut filled = 0;
-    while filled < buf.len() {
-        match r.read(&mut buf[filled..])? {
-            0 => break,
-            n => filled += n,
+/// Finds the complete blocks at the start of `data`. A partial block at the end is not
+/// an error here, since more input may follow.
+fn complete_block_spans(data: &[u8]) -> Result<Vec<BlockSpan>> {
+    let mut spans = Vec::new();
+    let mut pos = 0usize;
+    while data.len() - pos >= FIXED_HEADER_LEN {
+        let xlen = check_fixed_header(&data[pos..])?;
+        let extra_end = pos + FIXED_HEADER_LEN + xlen;
+        if extra_end > data.len() {
+            break;
         }
+        let size = block_size_from_extra(&data[pos + FIXED_HEADER_LEN..extra_end])
+            .ok_or_else(|| SeqError::malformed_at("BGZF", pos as u64, "missing BC subfield"))?;
+        if size < FIXED_HEADER_LEN + xlen + FOOTER_LEN || size > MAX_BLOCK_SIZE {
+            return Err(SeqError::malformed_at("BGZF", pos as u64, "invalid block size"));
+        }
+        if pos + size > data.len() {
+            break;
+        }
+        spans.push(BlockSpan { start: pos, size });
+        pos += size;
     }
-    Ok(filled)
+    Ok(spans)
 }
 
-fn truncated(e: io::Error, offset: u64) -> SeqError {
-    if e.kind() == io::ErrorKind::UnexpectedEof {
-        SeqError::malformed_at("BGZF", offset, "truncated block")
-    } else {
-        SeqError::Io(e)
-    }
+/// Inflates one whole block, checking its CRC and size.
+fn inflate_span(block: &[u8]) -> Result<Vec<u8>> {
+    let xlen = check_fixed_header(block)?;
+    let rest = &block[FIXED_HEADER_LEN + xlen..];
+    let (cdata, footer) = rest.split_at(rest.len() - FOOTER_LEN);
+    let crc = u32::from_le_bytes([footer[0], footer[1], footer[2], footer[3]]);
+    let isize = u32::from_le_bytes([footer[4], footer[5], footer[6], footer[7]]);
+    inflate_block(cdata, crc, isize)
 }
 
 /// Compresses one payload into a complete BGZF block.
