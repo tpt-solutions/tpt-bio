@@ -1,7 +1,7 @@
 # GPU ray casting (retired native path, kept as reference)
 
-`raycast.wgsl` is the compute shader. It is standard WGSL, so a browser can run it unchanged
-through the WebGPU API. It is not compiled by this crate.
+The compute shader is now `src/render3d/raycast.wgsl`. It is standard WGSL, which the browser
+runs through the WebGPU API, and the `webgpu` feature builds it in.
 
 `wgpu_host.rs.txt` is the native wgpu 26 host code that drove the shader. It is not compiled.
 It was verified on an Intel UHD 770 (Windows, DX12): perspective two-channel and orthographic

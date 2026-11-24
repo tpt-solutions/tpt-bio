@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tpt-bio WebGPU check</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; }
+    pre { background: #f4f4f4; padding: 12px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>tpt-bio: WebGPU ray casting check</h1>
+  <p>Renders one scene on the CPU and with WebGPU, then compares the images.</p>
+  <pre id="result">running</pre>
+  <script type="module">
+    import init, { run_comparison } from "./pkg/tpt_bio_web.js";
+    const out = document.getElementById("result");
+    try {
+      await init();
+      const r = await run_comparison(96, 80);
+      out.textContent = `${r.ok ? "PASS" : "FAIL"} maxDiff=${r.maxDiff} pixels=${r.pixels} size=${r.width}x${r.height}`;
+    } catch (e) {
+      out.textContent = `ERROR ${e}`;
+    }
+  </script>
+</body>
+</html>

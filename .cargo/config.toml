@@ -1,0 +1,3 @@
+# web-sys exposes its WebGPU bindings only with this cfg. It applies to the wasm32 target only.
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg=web_sys_unstable_apis"]

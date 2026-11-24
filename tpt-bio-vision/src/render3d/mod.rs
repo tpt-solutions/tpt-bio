@@ -10,6 +10,7 @@
 //! - [`overlay`]: label overlay with first-hit surface blending and a deterministic palette.
 //! - [`isosurface`]: marching-tetrahedra isosurfaces producing a triangle [`isosurface::Mesh`].
 //! - [`lod`]: block-max downsampling and screen-footprint level selection.
+//! - [`webgpu`] (feature `webgpu`, wasm32): the same marching through the browser's WebGPU.
 //! - [`stream`]: block-max levels streamed from a [`stream::SlabSource`], one z-slab at a time.
 //! - [`rasterise`]: flat-shaded z-buffer rasteriser for isosurface meshes.
 
@@ -22,6 +23,8 @@ pub mod raycast;
 pub mod stream;
 pub mod transfer;
 pub mod volume;
+#[cfg(all(feature = "webgpu", target_arch = "wasm32"))]
+pub mod webgpu;
 
 use std::fmt;
 

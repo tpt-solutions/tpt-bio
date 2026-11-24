@@ -1,0 +1,22 @@
+[package]
+name = "tpt-bio-web"
+description = "Browser demo for tpt-bio: CPU and WebGPU volume ray casting compared on one scene"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# The demo only builds for wasm32. Native builds compile an empty library.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tpt-bio-vision = { workspace = true, features = ["webgpu"] }
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+
+[lints]
+workspace = true

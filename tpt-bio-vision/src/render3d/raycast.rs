@@ -161,7 +161,7 @@ pub(super) fn finish(colour: [f32; 3], alpha: f32, background: [u8; 3]) -> Rgba8
 }
 
 /// Parametric range `[t0, t1]` over which `ray` is inside the box `[0, extent]`.
-fn intersect_box(ray: &Ray, extent: [f64; 3]) -> Option<(f64, f64)> {
+pub(super) fn intersect_box(ray: &Ray, extent: [f64; 3]) -> Option<(f64, f64)> {
     let mut t0 = f64::NEG_INFINITY;
     let mut t1 = f64::INFINITY;
     for ((&o, &d), &hi) in ray.origin.iter().zip(&ray.dir).zip(&extent) {

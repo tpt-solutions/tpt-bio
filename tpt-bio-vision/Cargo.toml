@@ -13,6 +13,8 @@ categories = ["science", "multimedia::images"]
 [features]
 # Forces tpt-simd's scalar kernels, to test the fallback path on any CPU.
 scalar-only = ["tpt-simd/scalar-only"]
+# Browser WebGPU ray casting. Only builds for wasm32.
+webgpu = ["dep:js-sys", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures"]
 
 [dependencies]
 tpt-bio-core.workspace = true
@@ -29,3 +31,16 @@ flate2.workspace = true
 
 [lints]
 workspace = true
+
+# Browser-only dependencies, used by the `webgpu` feature.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = { workspace = true, optional = true }
+wasm-bindgen = { workspace = true, optional = true }
+wasm-bindgen-futures = { workspace = true, optional = true }
+web-sys = { workspace = true, optional = true, features = [
+    "Document", "Gpu", "GpuAdapter", "GpuAutoLayoutMode", "GpuBindGroup", "GpuBindGroupDescriptor",
+    "GpuBindGroupEntry", "GpuBindGroupLayout", "GpuBufferBinding", "GpuBuffer", "GpuBufferDescriptor", "GpuCommandBuffer",
+    "GpuCommandEncoder", "GpuComputePassEncoder", "GpuComputePipeline", "GpuComputePipelineDescriptor",
+    "GpuDevice", "GpuProgrammableStage", "GpuQueue", "GpuShaderModule", "GpuShaderModuleDescriptor",
+    "HtmlCanvasElement", "Navigator", "Window",
+] }
