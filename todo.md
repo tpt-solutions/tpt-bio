@@ -64,9 +64,9 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 
 ### Test data & tooling
 - [ ] Choose permissively-licensed test data (small BAM/CRAM/VCF/FASTQ, OME-TIFF, Zarr) _(tests are self-contained with generated data; external fixtures not chosen, see docs/test-data.md)_
-- [x] Set up `criterion` (check license) or a custom benchmark harness _(criterion is a dev-dependency; its Apache-only transitive crates still need a decision)_
+- [x] Set up the benchmark harness: `tpt-benchmark` (git dev-dependency, pinned to `8384f44`) replaces `criterion`, which is removed _(its Apache-only transitive crates are no longer in the lock; `borsh-derive` is a stale lock entry, see docs/dependency-audit.md)_
 - [x] Set up `cargo-fuzz` infrastructure _(fuzz/ builds; targets not yet run under libFuzzer)_
-- [ ] Install samtools/bcftools locally for oracle comparisons (test-only, never linked) _(BLOCKED: not installed on this machine)_
+- [x] Install samtools/bcftools locally for oracle comparisons (test-only, never linked) _(installed in WSL Ubuntu: samtools 1.22.1, bcftools 1.22, tabix 1.22.1; not on the Windows PATH, and never linked into the crates)_
 
 ---
 
@@ -112,19 +112,19 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Auxiliary tag parsing (all types, arrays)
 - [x] BAM writer
 - [x] SAM <-> BAM round-trip tests
-- [ ] Conformance tests vs samtools and noodles outputs _(BLOCKED: samtools not installed; noodles not used)_
+- [x] Conformance tests vs samtools and noodles outputs _(samtools 1.22 only: our BAM is read by samtools with identical records; samtools BAM decodes to its own records; noodles not used)_
 
 ### BAI index & random access
 - [x] BAI parser (bins, chunks, linear index)
 - [x] Region -> chunk query (O(log N))
 - [x] BAI builder (`index` from a coordinate-sorted BAM)
 - [x] Region query API (`reader.query("chr1:1000-2000")`) _(fetch() takes a reference ID and coordinates; no string API)_
-- [ ] Tests vs samtools-generated indexes _(BLOCKED: samtools not installed)_
+- [x] Tests vs samtools-generated indexes _(our BAI matches `samtools index` for a 250-record file byte for byte, and for 20,000 and 300,000 reads once parsed; only bin order in the file differs, as samtools uses hash order; region queries match samtools)_
 
 ### CLI (minimal) & milestone
 - [x] `tptbio seq view` (BAM/SAM, region, header-only, format output)
 - [x] `tptbio seq index`
-- [ ] Benchmark suite vs samtools (view, index, region query) on a human-genome-scale BAM _(BLOCKED: samtools not installed; no benchmark harness yet)_
+- [ ] Benchmark suite vs samtools (view, index, region query) on a human-genome-scale BAM _(synthetic 300,000-read BAM timed against samtools 1.22.1: view 521 ms vs 341 ms, region 48 ms vs 30 ms, index 176 ms vs 290 ms, across WSL and native Windows; no human genome data, so the milestone stays open; see docs/samtools-bcftools-conformance.md)_
 - [ ] **Milestone:** `tptbio seq view` reads and indexes a standard human genome BAM faster than samtools _(not measured; see benchmark item)_
 
 ---
@@ -135,18 +135,18 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] VCF header parser (INFO, FORMAT, FILTER, contig, samples) _(`tpt-bio-seq::vcf`; structured meta lines are split into fields)_
 - [x] Zero-copy VCF record parser and writer _(`VcfRecord` borrows its line; `VcfWriter` validates columns; line-numbered errors)_
 - [x] BGZF-compressed VCF _(`VcfReader::new_bgzf`, `VcfWriter::new_bgzf` + `finish`)_
-- [x] BCF2 header and typed value decoding _(`tpt-bio-seq::bcf`; encodings for the empty FILTER and flag types follow the spec from memory and need an oracle check)_
+- [x] BCF2 header and typed value decoding _(checked against bcftools 1.22: bcftools reads our BCF with identical records, and we read its BCF identically; an empty ID was a bug, now fixed)_
 - [x] BCF record parser and writer _(records decode to VCF text, so `next_record` returns a `VcfRecord`)_
-- [x] VCF <-> BCF round-trip tests _(in-process only; no bcftools oracle)_
-- [x] Tabix (TBI) and CSI index parse + build _(`tpt-bio-seq::tabix`; the 0x10000 zero-based flag, CSI `loffset` semantics and BGZF-compressed index output are unverified)_
-- [x] Region queries for VCF/BCF _(checked against a brute-force scan on generated data, not against samtools or bcftools output)_
+- [x] VCF <-> BCF round-trip tests _(both directions checked against bcftools 1.22 on 240 generated records)_
+- [x] Tabix (TBI) and CSI index parse + build _(TBI and CSI are byte-identical to tabix and bcftools once decompressed; fixed: the trailing n_no_coor count, and CSI depth 0 was rejected)_
+- [x] Region queries for VCF/BCF _(match tabix and bcftools on seven regions, including empty and edge regions)_
 - [x] `tptbio seq view` for VCF/BCF _(VCF, bgzipped VCF and BCF, with region queries via tabix or CSI)_
-- [ ] Conformance tests vs bcftools _(BLOCKED: bcftools not installed)_
+- [x] Conformance tests vs bcftools _(BCF, TBI and CSI checked against bcftools 1.22 and tabix 1.22 on generated data; not exhaustive over every BCF type)_
 
 ### CRAM / CRAI
 - [x] CRAM container and slice structure parser _(container, block framing and slice header; EOF marker is a self-consistent substitute, not the spec's)_
 - [x] CRAM header and compression header decoding _(compression header and encodings decoded; field layouts from memory, not verified against samtools)_
-- [ ] Core codecs: rANS 4x8, rANS Nx16, Huffman, beta, gamma, subexp, external _(rANS 4x8 order 0 and 1, Huffman, beta, gamma, subexp, external done; Nx16 covers ORDER, N32, NO_SIZE and CAT only; STRIPE, RLE and PACK not done; layouts not checked against htscodecs)_
+- [ ] Core codecs: rANS 4x8, rANS Nx16, Huffman, beta, gamma, subexp, external _(rANS 4x8 order 0 and 1, Huffman, beta, gamma, subexp, external done; rANS Nx16 order 0 with PACK, RLE, CAT and STRIPE done, RLE and STRIPE only from hand-built streams; Nx16 order 1 and 32-state coder not done)_
 - [x] Gzip, bzip2 and LZMA block compression _(gzip and rANS blocks done; bzip2 and LZMA return Unsupported, documented)_
 - [x] Reference sequence handling (local FASTA + `.fai`, MD5 lookup) _(FASTA reference with MD5 region check; in-memory FASTA also accepted)_
 - [x] Reference-free / embedded reference mode _(reads needing copied bases return Unsupported; unknown-bases flag not handled)_
@@ -154,7 +154,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] CRAM writer (at least CRAM 3.0) _(CRAM 3.0 writer; gzip data blocks; EOF marker not the spec's 38 bytes)_
 - [x] CRAI parse + build, region queries _(build, parse and query, tested against a brute-force scan)_
 - [x] BAM <-> CRAM round-trip tests _(round trips for multi-slice, reference and reference-free files; no samtools comparison)_
-- [ ] Conformance tests vs samtools _(BLOCKED: samtools not installed)_
+- [ ] Conformance tests vs samtools _(CRAM 3.0 and 3.1 decode both ways with samtools 1.22, with every column and tag matching; Nx16 order 1, N32, and the RLE and STRIPE transforms are not checked against samtools output; reference-free files not tested; see docs/cram-conformance.md)_
 
 ### FASTA / misc
 - [x] FASTA reader/writer and `.fai` index
@@ -165,7 +165,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 ### Hardening
 - [x] Fuzz targets for BGZF, BAM, VCF, BCF, CRAM, indexes _(targets for BGZF, BAM, BAI, FASTQ, SAM, VCF, BCF, tabix, FASTA and CRAM)_
 - [x] Malformed-input corpus tests (no panics, bounded memory) _(12 parsers, no panics found; zero-filled over-allocations fixed; bounded memory not asserted by tests)_
-- [ ] Benchmarks for VCF/BCF/CRAM vs bcftools/samtools _(self-measured baseline in docs/benchmarks.md; no comparison: BLOCKED, no bcftools or samtools)_
+- [ ] Benchmarks for VCF/BCF/CRAM vs bcftools/samtools _(BAM view, region and index timed against samtools; VCF, BCF and CRAM not timed against bcftools or samtools yet)_
 
 ---
 
