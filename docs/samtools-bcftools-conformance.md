@@ -73,14 +73,18 @@ The examples in `tpt-bio-seq/examples/` run our side of each comparison:
 Median of five runs, in milliseconds, on this machine, for a synthetic BAM of 300,000
 100-base reads over three contigs (11 MB). samtools ran in WSL Ubuntu and tptbio ran
 natively on Windows (release build). The two environments are not identical, and each
-time includes process start-up. Treat these as indicative only.
+time includes process start-up. samtools' own medians ranged from 269 to 461 ms for
+`view` across runs, so treat these as indicative only.
 
 | Operation | samtools 1.22.1 | tptbio |
 |---|---|---|
-| `view` to SAM text (all records) | 341 | 521 |
-| `view` region `chr2:1000000-3000000` (indexed) | 30 | 48 |
-| index build | 290 | 176 |
+| `view` to SAM text (all records) | 298 | 304 |
+| `view` region `chr2:1000000-3000000` (indexed) | 14 | 51 |
+| index build | 273 | 94 |
+
+Changes made to reach these numbers: SAM lines are written into one reused buffer,
+BAM sequences decode through a lookup table, and BGZF blocks are inflated in parallel
+in batches (read-ahead starts at 64 KiB after each seek, and grows to 4 MiB).
 
 Our records and region results were checked against samtools on the same file. Human
 genome data was not available, so the milestone for a human-genome BAM remains open.
-

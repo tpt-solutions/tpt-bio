@@ -124,7 +124,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 ### CLI (minimal) & milestone
 - [x] `tptbio seq view` (BAM/SAM, region, header-only, format output)
 - [x] `tptbio seq index`
-- [ ] Benchmark suite vs samtools (view, index, region query) on a human-genome-scale BAM _(synthetic 300,000-read BAM timed against samtools 1.22.1: view 521 ms vs 341 ms, region 48 ms vs 30 ms, index 176 ms vs 290 ms, across WSL and native Windows; no human genome data, so the milestone stays open; see docs/samtools-bcftools-conformance.md)_
+- [ ] Benchmark suite vs samtools (view, index, region query) on a human-genome-scale BAM _(synthetic 300,000-read BAM: view 304 ms vs samtools 298 ms, index 94 ms vs 273 ms, region 51 ms vs 14 ms; samtools' medians varied from 269 to 461 ms, and the environments differ (WSL vs native); no human genome data, so the milestone stays open; see docs/samtools-bcftools-conformance.md)_
 - [ ] **Milestone:** `tptbio seq view` reads and indexes a standard human genome BAM faster than samtools _(not measured; see benchmark item)_
 
 ---
@@ -146,7 +146,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 ### CRAM / CRAI
 - [x] CRAM container and slice structure parser _(container, block framing and slice header; EOF marker is a self-consistent substitute, not the spec's)_
 - [x] CRAM header and compression header decoding _(compression header and encodings decoded; field layouts from memory, not verified against samtools)_
-- [ ] Core codecs: rANS 4x8, rANS Nx16, Huffman, beta, gamma, subexp, external _(rANS 4x8 order 0 and 1, Huffman, beta, gamma, subexp, external done; rANS Nx16 order 0 with PACK, RLE, CAT and STRIPE done, RLE and STRIPE only from hand-built streams; Nx16 order 1 and 32-state coder not done)_
+- [ ] Core codecs: rANS 4x8, rANS Nx16, Huffman, beta, gamma, subexp, external _(all decode; rANS Nx16 order 1 and 32 states verified against samtools; RLE and STRIPE only from htscodecs-derived vectors; order 2 and bzip2 unsupported, as bzip2 needs a permissive decoder the workspace lacks)_
 - [x] Gzip, bzip2 and LZMA block compression _(gzip and rANS blocks done; bzip2 and LZMA return Unsupported, documented)_
 - [x] Reference sequence handling (local FASTA + `.fai`, MD5 lookup) _(FASTA reference with MD5 region check; in-memory FASTA also accepted)_
 - [x] Reference-free / embedded reference mode _(reads needing copied bases return Unsupported; unknown-bases flag not handled)_
@@ -154,7 +154,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] CRAM writer (at least CRAM 3.0) _(CRAM 3.0 writer; gzip data blocks; EOF marker not the spec's 38 bytes)_
 - [x] CRAI parse + build, region queries _(build, parse and query, tested against a brute-force scan)_
 - [x] BAM <-> CRAM round-trip tests _(round trips for multi-slice, reference and reference-free files; no samtools comparison)_
-- [ ] Conformance tests vs samtools _(CRAM 3.0 and 3.1 decode both ways with samtools 1.22, with every column and tag matching; Nx16 order 1, N32, and the RLE and STRIPE transforms are not checked against samtools output; reference-free files not tested; see docs/cram-conformance.md)_
+- [ ] Conformance tests vs samtools _(CRAM 3.0 and 3.1 decode both ways with samtools 1.22, every column and tag matching; TOK3 name codec verified for rANS, arithmetic and duplicate/zero-delta name shapes; NOP is never produced by samtools; RLE and STRIPE only from reference vectors; TOK3 writing not implemented; see docs/cram-conformance.md)_
 
 ### FASTA / misc
 - [x] FASTA reader/writer and `.fai` index
@@ -165,7 +165,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 ### Hardening
 - [x] Fuzz targets for BGZF, BAM, VCF, BCF, CRAM, indexes _(targets for BGZF, BAM, BAI, FASTQ, SAM, VCF, BCF, tabix, FASTA and CRAM)_
 - [x] Malformed-input corpus tests (no panics, bounded memory) _(12 parsers, no panics found; zero-filled over-allocations fixed; bounded memory not asserted by tests)_
-- [ ] Benchmarks for VCF/BCF/CRAM vs bcftools/samtools _(BAM view, region and index timed against samtools; VCF, BCF and CRAM not timed against bcftools or samtools yet)_
+- [ ] Benchmarks for VCF/BCF/CRAM vs bcftools/samtools _(BAM view, region and index timed against samtools; the benchmark harness is tpt-benchmark, pinned to 8384f44; VCF, BCF and CRAM not timed against bcftools or samtools yet)_
 
 ---
 
@@ -241,7 +241,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [ ] wgpu (check license expression) volume renderer: texture upload, ray-marching _(not started: CPU reference renderer only)_
 - [x] Label/mask overlay and per-cell coloring _(CPU renderer, first-hit blending)_
 - [x] Mesh / isosurface rendering of segmented cells _(marching tetrahedra and a flat-shaded CPU rasteriser)_
-- [ ] Large-volume handling (chunked/streamed, level of detail) _(block-max LOD and a level-choice function exist; no chunked streaming)_
+- [ ] Large-volume handling (chunked/streamed, level of detail) _(block-max LOD with the usual rule: coarsest level whose voxels cover at most N pixels; no chunked streaming)_
 - [ ] Browser target (WASM + WebGPU) demo
 - [ ] Optional Tauri desktop app (license check for Tauri and its dependency tree)
 - [x] Camera controls, channel and clipping controls _(library API only; no interactive UI)_
@@ -296,7 +296,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] `no_std` verification on an embedded target _(tpt-bio-core builds for thumbv7em-none-eabihf with --no-default-features)_
 
 ### License & compliance (final)
-- [ ] Full `cargo deny check` clean on the release commit _(advisories, bans, sources and licences pass; Apache-2.0-only ciborium and borsh-derive come in via criterion and need a decision)_
+- [ ] Full `cargo deny check` clean on the release commit _(bans, sources and licences pass; criterion, which brought in Apache-only ciborium, is removed; a stale borsh-derive entry remains in Cargo.lock but is not in the build graph; advisories not re-run on the release commit)_
 - [x] Regenerate `docs/dependency-audit.md` and a third-party notices file _(THIRD_PARTY.md generated from cargo metadata, 214 packages; docs/dependency-audit.md updated)_
 - [x] Confirm zero-FFI: no `-sys` crates in the dependency tree (`cargo tree` check in CI) _(only windows-sys among -sys crates; pyo3-ffi only in the bindings, which CI now excludes on purpose; docs/zero-ffi.md)_
 - [ ] Confirm headers/Cargo metadata/LICENSE files consistent in all crates and in the Python package _(READMEs and readme keys are consistent; per-crate LICENSE files are not present)_
