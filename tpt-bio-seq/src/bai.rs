@@ -30,7 +30,98 @@ pub struct Chunk {
 pub struct RefIndex {
     bins: BTreeMap<u32, Vec<Chunk>>,
     linear: Vec<VirtualOffset>,
+    meta: Option<RefMeta>,
+    /// The open run of consecutive records in one bin. It becomes a chunk when the
+    /// bin changes, as in htslib.
+    run: Option<Run>,
 }
+
+/// A run of consecutive records that fall in the same bin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Run {
+    bin: u32,
+    beg: VirtualOffset,
+    end: VirtualOffset,
+}
+
+/// Deepest binning level for BAI, which uses a `min_shift` of 14.
+const N_LVLS: u32 = 5;
+/// Bins below this are real bins. The pseudo-bin 37450 holds metadata and is excluded.
+const N_BINS: u32 = 37_450;
+/// A bin whose chunks span less than this many BGZF blocks is merged into its parent
+/// (htslib's `HTS_MIN_MARKER_DIST`, in units of 64 KiB blocks).
+const MIN_MARKER_DIST: u64 = 0x1_0000;
+
+impl RefIndex {
+    fn add_to_run(&mut self, bin: u32, beg: VirtualOffset, end: VirtualOffset) {
+        match &mut self.run {
+            Some(run) if run.bin == bin => run.end = end,
+            _ => {
+                self.flush_run();
+                self.run = Some(Run { bin, beg, end });
+            }
+        }
+    }
+
+    fn flush_run(&mut self) {
+        if let Some(run) = self.run.take() {
+            self.bins.entry(run.bin).or_default().push(Chunk { beg: run.beg, end: run.end });
+        }
+    }
+
+    /// Applies htslib's compression of the binning index: small bins move to their
+    /// parent, chunks are sorted, and chunks that touch the same BGZF block are merged.
+    fn compress(&mut self) {
+        for level in (1..=N_LVLS).rev() {
+            let start = (8u32.pow(level) - 1) / 7;
+            let keys: Vec<u32> = self.bins.range(start..N_BINS).map(|(&k, _)| k).collect();
+            for key in keys {
+                let Some(list) = self.bins.get_mut(&key) else { continue };
+                if level < N_LVLS {
+                    list.sort_by_key(|c| (c.beg.raw(), c.end.raw()));
+                }
+                let (Some(head), Some(tail)) = (list.first(), list.last()) else { continue };
+                let span = (tail.end.raw() >> 16).wrapping_sub(head.beg.raw() >> 16);
+                let parent = (key - 1) >> 3;
+                if span < MIN_MARKER_DIST
+                    && self.bins.contains_key(&parent)
+                    && let Some(moved) = self.bins.remove(&key)
+                {
+                    self.bins.entry(parent).or_default().extend(moved);
+                }
+            }
+        }
+        for list in self.bins.values_mut() {
+            list.sort_by_key(|c| (c.beg.raw(), c.end.raw()));
+            let mut m = 0;
+            for l in 1..list.len() {
+                let next = list[l];
+                if list[m].end.raw() >> 16 >= next.beg.raw() >> 16 {
+                    if list[m].end.raw() < next.end.raw() {
+                        list[m].end = next.end;
+                    }
+                } else {
+                    m += 1;
+                    list[m] = next;
+                }
+            }
+            list.truncate(if list.is_empty() { 0 } else { m + 1 });
+        }
+    }
+}
+
+/// Per-reference summary stored in the pseudo-bin 37450 that samtools writes: the
+/// virtual span of the reference's records and their mapped and unmapped counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RefMeta {
+    beg: VirtualOffset,
+    end: VirtualOffset,
+    n_mapped: u64,
+    n_unmapped: u64,
+}
+
+/// The pseudo-bin that holds [`RefMeta`]. It is the bin after every real bin.
+const META_BIN: u32 = 37_450;
 
 /// A BAI index for a whole BAM file.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -73,7 +164,14 @@ impl Index {
         });
         let bin = reg2bin(beg, end_pos);
         let r = &mut self.refs[rid];
-        push_chunk(r.bins.entry(u32::from(bin)).or_default(), Chunk { beg: begin, end });
+        r.add_to_run(u32::from(bin), begin, end);
+        let meta = r.meta.get_or_insert(RefMeta { beg: begin, end, n_mapped: 0, n_unmapped: 0 });
+        meta.end = end;
+        if view.flags().0 & crate::record::Flags::UNMAPPED != 0 {
+            meta.n_unmapped += 1;
+        } else {
+            meta.n_mapped += 1;
+        }
 
         let first = (beg >> LINEAR_SHIFT) as usize;
         let last = ((end_pos - 1) >> LINEAR_SHIFT) as usize;
@@ -91,9 +189,13 @@ impl Index {
     /// all records are added.
     pub fn finish(&mut self) {
         for r in &mut self.refs {
-            for i in 1..r.linear.len() {
+            r.flush_run();
+            r.compress();
+            // htslib fills an empty window from the next window that has an offset, so
+            // walk backwards. The last window is always set.
+            for i in (0..r.linear.len().saturating_sub(1)).rev() {
                 if r.linear[i].raw() == 0 {
-                    r.linear[i] = r.linear[i - 1];
+                    r.linear[i] = r.linear[i + 1];
                 }
             }
         }
@@ -141,7 +243,8 @@ impl Index {
         w.write_all(MAGIC)?;
         w.write_all(&(self.refs.len() as i32).to_le_bytes())?;
         for r in &self.refs {
-            w.write_all(&(r.bins.len() as i32).to_le_bytes())?;
+            let n_bins = r.bins.len() + usize::from(r.meta.is_some());
+            w.write_all(&(n_bins as i32).to_le_bytes())?;
             for (bin, chunks) in &r.bins {
                 w.write_all(&bin.to_le_bytes())?;
                 w.write_all(&(chunks.len() as i32).to_le_bytes())?;
@@ -150,14 +253,21 @@ impl Index {
                     w.write_all(&c.end.raw().to_le_bytes())?;
                 }
             }
+            if let Some(m) = r.meta {
+                w.write_all(&META_BIN.to_le_bytes())?;
+                w.write_all(&2i32.to_le_bytes())?;
+                w.write_all(&m.beg.raw().to_le_bytes())?;
+                w.write_all(&m.end.raw().to_le_bytes())?;
+                w.write_all(&m.n_mapped.to_le_bytes())?;
+                w.write_all(&m.n_unmapped.to_le_bytes())?;
+            }
             w.write_all(&(r.linear.len() as i32).to_le_bytes())?;
             for v in &r.linear {
                 w.write_all(&v.raw().to_le_bytes())?;
             }
         }
-        if let Some(n) = self.n_no_coor {
-            w.write_all(&n.to_le_bytes())?;
-        }
+        // htslib always writes the unplaced-read count, even when it is zero.
+        w.write_all(&self.n_no_coor.unwrap_or(0).to_le_bytes())?;
         Ok(())
     }
 
@@ -194,7 +304,7 @@ impl Index {
             for _ in 0..n_intv.max(0) {
                 linear.push(VirtualOffset::from_raw(read_u64(&mut r)?));
             }
-            refs.push(RefIndex { bins, linear });
+            refs.push(RefIndex { bins, linear, meta: None, run: None });
         }
         // The trailing unplaced-read count is optional in the format.
         let mut tail = [0u8; 8];
@@ -203,17 +313,6 @@ impl Index {
             Err(_) => None,
         };
         Ok(Self { refs, n_no_coor })
-    }
-}
-
-fn push_chunk(chunks: &mut Vec<Chunk>, c: Chunk) {
-    match chunks.last_mut() {
-        Some(last) if c.beg <= last.end => {
-            if c.end > last.end {
-                last.end = c.end;
-            }
-        }
-        _ => chunks.push(c),
     }
 }
 
@@ -323,7 +422,8 @@ mod tests {
 
     #[test]
     fn index_serialization_roundtrip() {
-        let idx = Index::default();
+        // Files always carry the unplaced-read count, so start from a stored zero.
+        let idx = Index { n_no_coor: Some(0), ..Index::default() };
         let mut bytes = Vec::new();
         idx.write_to(&mut bytes).unwrap();
         let back = Index::read_from(&bytes[..]).unwrap();
@@ -334,18 +434,5 @@ mod tests {
     fn index_rejects_bad_magic_and_truncation() {
         assert!(Index::read_from(&b"NOPE"[..]).is_err());
         assert!(Index::read_from(&b"BAI\x01\x05\x00"[..]).is_err());
-    }
-
-    #[test]
-    fn merge_adjacent_chunks() {
-        let mut v = Vec::new();
-        let c = |a: u64, b: u64| Chunk {
-            beg: VirtualOffset::from_raw(a),
-            end: VirtualOffset::from_raw(b),
-        };
-        push_chunk(&mut v, c(10, 20));
-        push_chunk(&mut v, c(20, 30));
-        push_chunk(&mut v, c(40, 50));
-        assert_eq!(v, vec![c(10, 30), c(40, 50)]);
     }
 }

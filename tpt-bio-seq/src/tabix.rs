@@ -74,7 +74,7 @@ impl IndexKind {
 
     fn validate(self) -> Result<()> {
         if let Self::Csi { min_shift, depth } = self
-            && (min_shift == 0 || depth == 0 || depth > 10 || min_shift + 3 * depth > 60)
+            && (min_shift == 0 || depth > 10 || min_shift + 3 * depth > 60)
         {
             return Err(SeqError::Unsupported(format!(
                 "CSI geometry min_shift={min_shift} depth={depth}"
@@ -279,6 +279,9 @@ pub struct TabixIndex {
     config: Option<TabixConfig>,
     names: Vec<String>,
     refs: Vec<RefIndex>,
+    /// Records with no coordinate, written after the reference data. Zero for an index
+    /// built from placed records; read when present.
+    n_no_coor: u64,
 }
 
 impl TabixIndex {
@@ -486,6 +489,7 @@ impl TabixIndex {
                 }
             }
         }
+        put_u64(&mut out, self.n_no_coor);
         Ok(out)
     }
 }
@@ -620,20 +624,20 @@ impl IndexBuilder {
             .zip(self.linear)
             .map(|(mut r, lin)| {
                 if kind == IndexKind::Tbi {
-                    let mut prev = VirtualOffset::from_raw(0);
-                    r.linear = lin
-                        .into_iter()
-                        .map(|v| {
-                            let v = v.unwrap_or(prev);
-                            prev = v;
-                            v
-                        })
-                        .collect();
+                    // As in htslib, an empty window takes the offset of the next window.
+                    let mut next = VirtualOffset::from_raw(0);
+                    let mut linear: Vec<VirtualOffset> = Vec::with_capacity(lin.len());
+                    for v in lin.into_iter().rev() {
+                        next = v.unwrap_or(next);
+                        linear.push(next);
+                    }
+                    linear.reverse();
+                    r.linear = linear;
                 }
                 r
             })
             .collect();
-        TabixIndex { kind, config: self.config, names: self.names, refs }
+        TabixIndex { kind, config: self.config, names: self.names, refs, n_no_coor: 0 }
     }
 }
 
@@ -830,6 +834,15 @@ fn split_names(raw: &[u8]) -> Result<Vec<String>> {
     Ok(names)
 }
 
+/// Reads the trailing count of records with no coordinate. Older writers omit it, so
+/// its absence is not an error.
+fn read_n_no_coor(p: &mut Parser<'_>) -> Result<u64> {
+    if p.data.len() - p.pos < 8 {
+        return Ok(0);
+    }
+    p.u64()
+}
+
 fn parse_index(data: &[u8]) -> Result<TabixIndex> {
     let mut p = Parser { data, pos: 0 };
     let magic = p.take(4)?;
@@ -839,7 +852,8 @@ fn parse_index(data: &[u8]) -> Result<TabixIndex> {
         let (cfg, names) = p.tabix_block()?;
         check_names(&names, n_ref)?;
         let refs = read_refs(&mut p, n_ref, kind)?;
-        return Ok(TabixIndex { kind, config: Some(cfg), names, refs });
+        let n_no_coor = read_n_no_coor(&mut p)?;
+        return Ok(TabixIndex { kind, config: Some(cfg), names, refs, n_no_coor });
     }
     if magic == CSI_MAGIC {
         let min_shift = u32::try_from(p.i32()?)
@@ -861,7 +875,8 @@ fn parse_index(data: &[u8]) -> Result<TabixIndex> {
             check_names(&names, n_ref)?;
         }
         let refs = read_refs(&mut p, n_ref, kind)?;
-        return Ok(TabixIndex { kind, config, names, refs });
+        let n_no_coor = read_n_no_coor(&mut p)?;
+        return Ok(TabixIndex { kind, config, names, refs, n_no_coor });
     }
     Err(SeqError::malformed(FORMAT, "missing TBI or CSI magic"))
 }
