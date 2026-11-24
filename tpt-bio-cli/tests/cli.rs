@@ -215,6 +215,23 @@ fn seq_view_header_only_prints_sam_header() {
     assert!(stdout(&out).contains("@SQ\tSN:chr1\tLN:100"), "{}", stdout(&out));
 }
 
+#[test]
+fn seq_sort_replaces_sort_order_instead_of_duplicating_it() {
+    let s = Scratch::new("sort-so");
+    let sam: &Path = &s.write(
+        "in.sam",
+        "@HD\tVN:1.6\tSO:unsorted\n@SQ\tSN:chr1\tLN:100\nr2\t0\tchr1\t50\t60\t4M\t*\t0\t0\tACGT\tIIII\nr1\t0\tchr1\t10\t60\t4M\t*\t0\t0\tACGT\tIIII\n",
+    );
+    let bam = s.0.join("out.bam");
+    let out = tptbio(&["seq", "sort", sam.to_str().unwrap(), "-o", bam.to_str().unwrap()]);
+    assert_eq!(code(&out), EXIT_OK, "{}", stderr(&out));
+    let out = tptbio(&["seq", "view", "-H", bam.to_str().unwrap()]);
+    assert_eq!(code(&out), EXIT_OK, "{}", stderr(&out));
+    let hd = stdout(&out).lines().find(|l| l.starts_with("@HD")).unwrap().to_owned();
+    assert_eq!(hd.matches("SO:").count(), 1, "{hd}");
+    assert!(hd.ends_with("SO:coordinate"), "{hd}");
+}
+
 const VCF_TEXT: &str = "##fileformat=VCFv4.2\n##contig=<ID=chr1,length=1000>\n##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Depth\">\n##FILTER=<ID=PASS,Description=\"All filters passed\">\n##FILTER=<ID=q10,Description=\"Quality below 10\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\nchr1\t100\trs1\tA\tG\t50\tPASS\tDP=10\nchr1\t200\t.\tC\tT\t.\tPASS\tDP=20\nchr1\t300\trs3\tG\tA,C\t60\tq10\tDP=30\n";
 
 const SAM_TEXT: &str = "@HD\tVN:1.6\tSO:unsorted\n@SQ\tSN:chr1\tLN:100\nr1\t0\tchr1\t10\t60\t4M\t*\t0\t0\tACGT\tIIII\n";

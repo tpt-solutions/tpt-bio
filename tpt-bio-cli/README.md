@@ -108,6 +108,10 @@ runs an end-to-end vision pipeline.
 
 Rust 1.95, set in the workspace manifest.
 
+## Status
+
+Version 0.1.0, pre-release. The commands above are the ones the binary exposes. Open items are tracked in `todo.md` in the repository root.
+
 ## Licence
 
 Dual-licensed under MIT OR Apache-2.0, at your option.

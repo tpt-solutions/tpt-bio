@@ -656,16 +656,20 @@ fn seq_flagstat(input: &Path) -> CliResult {
 fn seq_sort(input: &Path, output: &Path) -> CliResult {
     let (header, mut records) = read_all(input)?;
     tpt_bio_seq::sort_coordinate(&mut records);
-    // The output header must say the file is coordinate-sorted.
+    // The output header must say the file is coordinate-sorted. Any existing SO
+    // field on the @HD line is replaced, so the tag never appears twice.
     let text = header.text().to_string();
-    let header = if text.contains("SO:coordinate") {
+    let header = if header.hd().and_then(|hd| hd.get("SO")) == Some("coordinate") {
         header
     } else {
         let mut rewritten = String::new();
         let mut done = false;
         for line in text.lines() {
             if !done && line.starts_with("@HD") {
-                let _ = writeln!(rewritten, "{line}\tSO:coordinate");
+                let mut fields: Vec<&str> =
+                    line.split('\t').filter(|f| !f.starts_with("SO:")).collect();
+                fields.push("SO:coordinate");
+                let _ = writeln!(rewritten, "{}", fields.join("\t"));
                 done = true;
             } else {
                 rewritten.push_str(line);
