@@ -225,7 +225,10 @@ fn read_attrs(e: &BytesStart<'_>) -> FormatResult<Attrs> {
     for attr in e.attributes() {
         let attr = attr.map_err(xml_err)?;
         let key = String::from_utf8_lossy(attr.key.local_name().as_ref()).into_owned();
-        let value = attr.unescape_value().map_err(xml_err)?.into_owned();
+        let value = attr
+            .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+            .map_err(xml_err)?
+            .into_owned();
         out.push((key, value));
     }
     Ok(out)
