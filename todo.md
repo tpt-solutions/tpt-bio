@@ -64,7 +64,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 
 ### Test data & tooling
 - [ ] Choose permissively-licensed test data (small BAM/CRAM/VCF/FASTQ, OME-TIFF, Zarr) _(tests are self-contained with generated data; external fixtures not chosen, see docs/test-data.md)_
-- [ ] Set up `criterion` (check license) or a custom benchmark harness _(not added yet)_
+- [x] Set up `criterion` (check license) or a custom benchmark harness _(criterion is a dev-dependency; its Apache-only transitive crates still need a decision)_
 - [x] Set up `cargo-fuzz` infrastructure _(fuzz/ builds; targets not yet run under libFuzzer)_
 - [ ] Install samtools/bcftools locally for oracle comparisons (test-only, never linked) _(BLOCKED: not installed on this machine)_
 
@@ -146,7 +146,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 ### CRAM / CRAI
 - [x] CRAM container and slice structure parser _(container, block framing and slice header; EOF marker is a self-consistent substitute, not the spec's)_
 - [x] CRAM header and compression header decoding _(compression header and encodings decoded; field layouts from memory, not verified against samtools)_
-- [ ] Core codecs: rANS 4x8, rANS Nx16, Huffman, beta, gamma, subexp, external _(rANS 4x8 and Huffman decode, beta, gamma, subexp and external done; rANS order 1 and Nx16 not done)_
+- [ ] Core codecs: rANS 4x8, rANS Nx16, Huffman, beta, gamma, subexp, external _(rANS 4x8 order 0 and 1, Huffman, beta, gamma, subexp, external done; Nx16 covers ORDER, N32, NO_SIZE and CAT only; STRIPE, RLE and PACK not done; layouts not checked against htscodecs)_
 - [x] Gzip, bzip2 and LZMA block compression _(gzip and rANS blocks done; bzip2 and LZMA return Unsupported, documented)_
 - [x] Reference sequence handling (local FASTA + `.fai`, MD5 lookup) _(FASTA reference with MD5 region check; in-memory FASTA also accepted)_
 - [x] Reference-free / embedded reference mode _(reads needing copied bases return Unsupported; unknown-bases flag not handled)_
@@ -163,9 +163,9 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Basic stats (flagstat-like)
 
 ### Hardening
-- [ ] Fuzz targets for BGZF, BAM, VCF, BCF, CRAM, indexes _(BGZF, BAM, VCF, BCF, tabix and FASTA targets exist and ran 60 s each; CRAM not yet)_
+- [x] Fuzz targets for BGZF, BAM, VCF, BCF, CRAM, indexes _(targets for BGZF, BAM, BAI, FASTQ, SAM, VCF, BCF, tabix, FASTA and CRAM)_
 - [x] Malformed-input corpus tests (no panics, bounded memory) _(12 parsers, no panics found; zero-filled over-allocations fixed; bounded memory not asserted by tests)_
-- [ ] Benchmarks for VCF/BCF/CRAM vs bcftools/samtools _(criterion benches exist for self-comparison only; BLOCKED: no bcftools or samtools)_
+- [ ] Benchmarks for VCF/BCF/CRAM vs bcftools/samtools _(self-measured baseline in docs/benchmarks.md; no comparison: BLOCKED, no bcftools or samtools)_
 
 ---
 
@@ -237,7 +237,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [ ] Tests vs scikit-learn reference results _(BLOCKED: scikit-learn not available)_
 
 ### 3D viewer (wgpu, ADR-003)
-- [ ] Architecture note: share the rendering paradigm with tpt-vertex
+- [x] Architecture note: share the rendering paradigm with tpt-vertex _(docs/architecture-3d-viewer.md; tpt-vertex not available, so the comparison is unverified)_
 - [ ] wgpu (check license expression) volume renderer: texture upload, ray-marching _(not started: CPU reference renderer only)_
 - [x] Label/mask overlay and per-cell coloring _(CPU renderer, first-hit blending)_
 - [x] Mesh / isosurface rendering of segmented cells _(marching tetrahedra and a flat-shaded CPU rasteriser)_
@@ -245,7 +245,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [ ] Browser target (WASM + WebGPU) demo
 - [ ] Optional Tauri desktop app (license check for Tauri and its dependency tree)
 - [x] Camera controls, channel and clipping controls _(library API only; no interactive UI)_
-- [ ] Viewer documentation and sample dataset
+- [x] Viewer documentation and sample dataset _(docs/viewer.md and a sample-volume generator example)_
 
 ---
 
@@ -268,7 +268,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [ ] Consistent output formats, exit codes, logging/verbosity _(exit codes 0/1/2 and -q/-v, output formats; logging is limited)_
 - [x] Config file support _(tptbio.toml with threads (recorded only), log_level, output_format)_
 - [x] CLI integration tests _(integration tests run against the built binary)_
-- [ ] Prebuilt binaries via CI (Linux/macOS/Windows) _(not done: needs a release workflow)_
+- [ ] Prebuilt binaries via CI (Linux/macOS/Windows) _(not done for the CLI; wheels.yml exists for Python only and has not run)_
 
 ### tpt-bio-py (PyO3 + maturin)
 - [x] Bindings for seq readers (iterators, region queries) _(FASTQ iterator and BAM region queries)_
@@ -278,28 +278,28 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Type stubs (`.pyi`), docstrings
 - [x] Release the GIL during heavy work _(sequence utilities only)_
 - [x] Python tests (pytest) _(5 tests, run against a locally built module)_
-- [ ] Wheels for Linux (manylinux), macOS (x86_64 + arm64), Windows via maturin in CI _(a Windows wheel built locally; CI and other platforms not done)_
-- [ ] Jupyter notebook example: results from the spec section 7 flow _(notebook written but not executed as a notebook)_
+- [ ] Wheels for Linux (manylinux), macOS (x86_64 + arm64), Windows via maturin in CI _(wheels.yml builds artifacts on manual dispatch only, not run; a Windows wheel built locally)_
+- [ ] Jupyter notebook example: results from the spec section 7 flow _(notebook code runs as a script; not executed as a notebook)_
 
 ---
 
 ## Phase 6: Hardening & Release v0.1.0
 
 ### Quality
-- [ ] API review across all crates (naming, error types, semver surface)
-- [ ] Full rustdoc coverage, mdBook or docs site
-- [ ] Tutorials: seq quickstart, vision quickstart, pipeline, Python
-- [ ] Performance regression checks in CI
-- [ ] Extended fuzzing run, fix findings _(60 s per new target, no crashes; a longer run is not done)_
+- [x] API review across all crates (naming, error types, semver surface) _(docs/api-review.md with 39 findings; not all fixed)_
+- [ ] Full rustdoc coverage, mdBook or docs site _(rustdoc passes with -D warnings for four crates; coverage not measured; no mdBook site)_
+- [x] Tutorials: seq quickstart, vision quickstart, pipeline, Python _(docs/tutorials, snippets run as examples; Python via a locally built wheel)_
+- [x] Performance regression checks in CI _(.github/workflows/perf.yml runs weekly and on demand, informational only; not run on GitHub)_
+- [ ] Extended fuzzing run, fix findings _(300 s per parser target, 60 s for CRAM; three BGZF/BCF/BAM over-allocation crashes fixed; longer runs not done)_
 - [x] Memory-safety review of every remaining `unsafe` block _(one unsafe block in tpt-bio-seq mmap; MappedFile::open is now unsafe)_
-- [ ] Cross-platform test pass (Linux/macOS/Windows, x86_64 + aarch64)
-- [ ] `no_std` verification on an embedded target
+- [ ] Cross-platform test pass (Linux/macOS/Windows, x86_64 + aarch64) _(Windows x86_64 only tested locally; see docs/platforms.md)_
+- [x] `no_std` verification on an embedded target _(tpt-bio-core builds for thumbv7em-none-eabihf with --no-default-features)_
 
 ### License & compliance (final)
-- [ ] Full `cargo deny check` clean on the release commit _(licences ok; advisories and bans not run on the release commit)_
-- [ ] Regenerate `docs/dependency-audit.md` and a third-party notices file
-- [ ] Confirm zero-FFI: no `-sys` crates in the dependency tree (`cargo tree` check in CI) _(audit: windows-sys only; pyo3-ffi comes in via the Python bindings, which the CI grep would not catch)_
-- [ ] Confirm headers/Cargo metadata/LICENSE files consistent in all crates and in the Python package _(audit: bindings/tpt-bio-py has no `readme` key; no crate directory contains a README.md, which `cargo publish` needs)_
+- [ ] Full `cargo deny check` clean on the release commit _(advisories, bans, sources and licences pass; Apache-2.0-only ciborium and borsh-derive come in via criterion and need a decision)_
+- [x] Regenerate `docs/dependency-audit.md` and a third-party notices file _(THIRD_PARTY.md generated from cargo metadata, 214 packages; docs/dependency-audit.md updated)_
+- [x] Confirm zero-FFI: no `-sys` crates in the dependency tree (`cargo tree` check in CI) _(only windows-sys among -sys crates; pyo3-ffi only in the bindings, which CI now excludes on purpose; docs/zero-ffi.md)_
+- [ ] Confirm headers/Cargo metadata/LICENSE files consistent in all crates and in the Python package _(READMEs and readme keys are consistent; per-crate LICENSE files are not present)_
 
 ### Release
 - [ ] Choose final crate names and check availability on crates.io _(names listed; availability not checked, since there was no network access)_
