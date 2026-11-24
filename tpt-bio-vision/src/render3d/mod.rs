@@ -10,6 +10,7 @@
 //! - [`overlay`]: label overlay with first-hit surface blending and a deterministic palette.
 //! - [`isosurface`]: marching-tetrahedra isosurfaces producing a triangle [`isosurface::Mesh`].
 //! - [`lod`]: block-max downsampling and screen-footprint level selection.
+//! - [`stream`]: block-max levels streamed from a [`stream::SlabSource`], one z-slab at a time.
 //! - [`rasterise`]: flat-shaded z-buffer rasteriser for isosurface meshes.
 
 pub mod camera;
@@ -18,6 +19,7 @@ pub mod lod;
 pub mod overlay;
 pub mod rasterise;
 pub mod raycast;
+pub mod stream;
 pub mod transfer;
 pub mod volume;
 
