@@ -5,6 +5,7 @@
 //! decoding, read-feature record decoding with reference reconstruction, the
 //! [`reader::CramReader`] and a [`writer::CramWriter`] for the subset described in their docs.
 
+mod arith;
 pub mod block;
 pub mod bytes;
 pub mod codec;
@@ -19,6 +20,7 @@ pub mod rans_nx16;
 pub mod reader;
 pub mod reference;
 pub mod slice;
+pub mod tok3;
 pub mod writer;
 
 #[cfg(test)]

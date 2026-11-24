@@ -4,16 +4,17 @@
 //! size (ITF8), raw size (ITF8), payload, then CRC32 (u32 LE) over every byte of
 //! the block before the checksum.
 //!
-//! Methods: 0 raw, 1 gzip, 4 rANS 4x8 (orders 0 and 1), 5 rANS Nx16. Methods 2
-//! (bzip2) and 3 (LZMA) are reported as [`SeqError::Unsupported`]: no audited
-//! pure-Rust, permissively licensed implementation is in the workspace.
+//! Methods: 0 raw, 1 gzip, 4 rANS 4x8 (orders 0 and 1), 5 rANS Nx16, 6 arithmetic,
+//! 8 TOK3 (read names, decode only). Methods 2 (bzip2) and 3 (LZMA) are reported as
+//! [`SeqError::Unsupported`]: no audited pure-Rust, permissively licensed
+//! implementation is in the workspace.
 
 use std::io::{Read, Write};
 
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 
 use crate::cram::bytes::{Cursor, crc32, put_itf8};
-use crate::cram::{rans, rans_nx16};
+use crate::cram::{arith, rans, rans_nx16, tok3};
 use crate::error::{Result, SeqError};
 
 const FORMAT: &str = "CRAM block";
@@ -33,6 +34,10 @@ pub enum Method {
     Rans4x8,
     /// rANS Nx16 (CRAM 3.1).
     RansNx16,
+    /// TOK3 tokenised read names (CRAM 3.1).
+    Tok3,
+    /// Adaptive arithmetic coder (CRAM 3.1). The stream's flag byte selects the order.
+    Arith,
 }
 
 impl Method {
@@ -44,6 +49,8 @@ impl Method {
             3 => Self::Lzma,
             4 => Self::Rans4x8,
             5 => Self::RansNx16,
+            6 => Self::Arith,
+            8 => Self::Tok3,
             _ => return Err(SeqError::malformed(FORMAT, format!("unknown method {c}"))),
         })
     }
@@ -56,6 +63,8 @@ impl Method {
             Self::Lzma => 3,
             Self::Rans4x8 => 4,
             Self::RansNx16 => 5,
+            Self::Arith => 6,
+            Self::Tok3 => 8,
         }
     }
 }
@@ -106,6 +115,8 @@ pub fn decompress(method: Method, payload: &[u8], raw_size: usize) -> Result<Vec
         }
         Method::Rans4x8 => rans::decode(payload)?,
         Method::RansNx16 => rans_nx16::decode(payload, raw_size)?,
+        Method::Tok3 => tok3::decode(payload, raw_size)?,
+        Method::Arith => arith::decode(payload, raw_size)?,
         Method::Bzip2 => {
             return Err(SeqError::Unsupported("CRAM block method bzip2 (method 2)".into()));
         }
@@ -167,8 +178,8 @@ pub fn write_block(
         }
         Method::Rans4x8 => rans::encode_o0(raw),
         Method::RansNx16 => rans_nx16::encode(raw),
-        Method::Bzip2 | Method::Lzma => {
-            return Err(SeqError::Unsupported("writing bzip2 or LZMA blocks".into()));
+        Method::Bzip2 | Method::Lzma | Method::Tok3 | Method::Arith => {
+            return Err(SeqError::Unsupported("writing bzip2, LZMA or TOK3 blocks".into()));
         }
     };
     let start = out.len();
