@@ -55,6 +55,19 @@ pub(crate) fn check_range(offset: u64, len: usize, total: u64) -> io::Result<()>
     Ok(())
 }
 
+/// A memory-mapped file from `tpt-bio-seq`. Opening the map is `unsafe` and happens in the
+/// caller, under the contract in [`MappedFile::open`](tpt_bio_seq::mmap::MappedFile::open):
+/// the file must not be modified while the map is alive. Reading through the map is safe.
+impl ByteSource for tpt_bio_seq::mmap::MappedFile {
+    fn len(&self) -> u64 {
+        ByteSource::len(self.as_slice())
+    }
+
+    fn read_exact_at(&self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
+        ByteSource::read_exact_at(self.as_slice(), offset, buf)
+    }
+}
+
 impl ByteSource for [u8] {
     fn len(&self) -> u64 {
         <[u8]>::len(self) as u64
@@ -153,4 +166,23 @@ mod tests {
         assert!(src.read_vec_at(9, 2).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn mapped_file_source_reads_like_a_slice() {
+        let src = tpt_bio_seq::mmap::MappedFile::from_vec(b"mapped bytes".to_vec());
+        assert_eq!(ByteSource::len(&src), 12);
+        let mut buf = [0u8; 5];
+        src.read_exact_at(7, &mut buf).unwrap();
+        assert_eq!(&buf, b"bytes");
+        assert_eq!(src.read_vec_at(0, 6).unwrap(), b"mapped");
+        assert!(src.read_vec_at(10, 4).is_err());
+    }
+
+    #[test]
+    fn mapped_file_source_empty() {
+        let src = tpt_bio_seq::mmap::MappedFile::from_vec(Vec::new());
+        assert!(ByteSource::is_empty(&src));
+        assert!(src.read_vec_at(0, 1).is_err());
+    }
 }
+

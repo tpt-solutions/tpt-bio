@@ -19,6 +19,7 @@ pub struct MappedFile {
 #[derive(Debug)]
 enum Inner {
     Mapped(memmap2::Mmap),
+    Owned(Vec<u8>),
     Empty,
 }
 
@@ -44,11 +45,23 @@ impl MappedFile {
         Ok(Self { inner: Inner::Mapped(map) })
     }
 
+    /// Wraps bytes already in memory, without mapping anything. This is safe, and it lets
+    /// code that takes a `MappedFile` be tested without a file on disk.
+    #[must_use]
+    pub fn from_vec(bytes: Vec<u8>) -> Self {
+        if bytes.is_empty() {
+            Self { inner: Inner::Empty }
+        } else {
+            Self { inner: Inner::Owned(bytes) }
+        }
+    }
+
     /// The file contents.
     #[must_use]
     pub fn as_slice(&self) -> &[u8] {
         match &self.inner {
             Inner::Mapped(m) => m,
+            Inner::Owned(v) => v,
             Inner::Empty => &[],
         }
     }
