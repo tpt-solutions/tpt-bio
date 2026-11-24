@@ -1,0 +1,57 @@
+{
+  "attributes": {
+    "ome": {
+      "version": "0.5",
+      "plate": {
+        "columns": [
+          {
+            "name": "1"
+          },
+          {
+            "name": "2"
+          },
+          {
+            "name": "3"
+          }
+        ],
+        "rows": [
+          {
+            "name": "A"
+          },
+          {
+            "name": "B"
+          }
+        ],
+        "wells": [
+          {
+            "path": "A/1",
+            "rowIndex": 0,
+            "columnIndex": 0
+          },
+          {
+            "path": "B/2",
+            "rowIndex": 1,
+            "columnIndex": 1
+          }
+        ],
+        "name": "screen",
+        "field_count": 2,
+        "acquisitions": [
+          {
+            "id": 0,
+            "name": "first",
+            "maximumfieldcount": 2
+          },
+          {
+            "id": 1,
+            "name": "second",
+            "maximumfieldcount": 2
+          }
+        ],
+        "version": "0.5"
+      }
+    }
+  },
+  "zarr_format": 3,
+  "node_type": "group"
+}
