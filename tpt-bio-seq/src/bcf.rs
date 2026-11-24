@@ -559,9 +559,8 @@ fn put_int_scalar(buf: &mut Vec<u8>, v: i64) -> Result<()> {
 }
 
 fn put_string(buf: &mut Vec<u8>, s: &str) -> Result<()> {
-    if s.is_empty() {
-        return put_descriptor(buf, TYPE_MISSING, 0);
-    }
+    // An empty string is a zero-length char array, which is what bcftools writes for
+    // a missing ID. Type 0 (null) is not valid for these fields.
     put_descriptor(buf, TYPE_CHAR, s.len())?;
     buf.extend_from_slice(s.as_bytes());
     Ok(())

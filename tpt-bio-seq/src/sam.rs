@@ -1,6 +1,5 @@
 //! SAM text reading and writing.
 
-use std::fmt::Write as _;
 use std::io::{BufRead, Write};
 
 use crate::error::{Result, SeqError};
@@ -199,7 +198,20 @@ fn parse_array(body: &str, line_no: u64) -> Result<TagValue> {
 /// # Errors
 /// Returns [`SeqError::Malformed`] if a reference ID is outside the header.
 pub fn format_record(rec: &Record, header: &Header) -> Result<String> {
-    let mut out = String::with_capacity(128 + rec.seq.len() * 2);
+    let mut out = Vec::with_capacity(128 + rec.seq.len() * 2);
+    format_record_into(rec, header, &mut out)?;
+    // Every byte written is ASCII, so this cannot fail.
+    Ok(String::from_utf8(out).unwrap_or_default())
+}
+
+/// Appends one record as a SAM line, without the newline, to `out`.
+///
+/// This writes straight into `out`, so a caller that reuses one buffer does not
+/// allocate per record.
+///
+/// # Errors
+/// Returns an error if a reference ID is outside the header.
+pub fn format_record_into(rec: &Record, header: &Header, out: &mut Vec<u8>) -> Result<()> {
     let name = |id: i32| -> Result<&str> {
         if id < 0 {
             Ok("*")
@@ -212,37 +224,48 @@ pub fn format_record(rec: &Record, header: &Header) -> Result<String> {
     let qname =
         if rec.name.is_empty() { "*" } else { std::str::from_utf8(&rec.name).unwrap_or("*") };
     let rname = name(rec.ref_id)?;
-    let rnext = if rec.next_ref_id < 0 {
-        "*".to_string()
+    out.extend_from_slice(qname.as_bytes());
+    write!(out, "\t{}\t{rname}\t{}\t{}\t", rec.flags.0, rec.pos + 1, rec.mapq)?;
+    write_cigar(out, &rec.cigar)?;
+    out.push(b'\t');
+    if rec.next_ref_id < 0 {
+        out.push(b'*');
     } else if rec.next_ref_id == rec.ref_id {
-        "=".to_string()
+        out.push(b'=');
     } else {
-        name(rec.next_ref_id)?.to_string()
-    };
-    let seq = if rec.seq.is_empty() { "*" } else { std::str::from_utf8(&rec.seq).unwrap_or("*") };
-    let qual = if rec.qual.is_empty() {
-        "*".to_string()
-    } else {
-        rec.qual.iter().map(|&q| char::from(q + 33)).collect()
-    };
-    let _ = write!(
-        out,
-        "{qname}\t{}\t{rname}\t{}\t{}\t{}\t{rnext}\t{}\t{}\t{seq}\t{qual}",
-        rec.flags.0,
-        rec.pos + 1,
-        rec.mapq,
-        crate::record::format_cigar(&rec.cigar),
-        rec.next_pos + 1,
-        rec.tlen,
-    );
-    for tag in &rec.tags {
-        out.push('\t');
-        out.push(char::from(tag.key[0]));
-        out.push(char::from(tag.key[1]));
-        out.push(':');
-        out.push_str(&tag.value.to_string());
+        out.extend_from_slice(name(rec.next_ref_id)?.as_bytes());
     }
-    Ok(out)
+    write!(out, "\t{}\t{}\t", rec.next_pos + 1, rec.tlen)?;
+    match std::str::from_utf8(&rec.seq) {
+        Ok(seq) if !rec.seq.is_empty() => out.extend_from_slice(seq.as_bytes()),
+        _ => out.push(b'*'),
+    }
+    out.push(b'\t');
+    if rec.qual.is_empty() {
+        out.push(b'*');
+    } else {
+        out.extend(rec.qual.iter().map(|&q| q + 33));
+    }
+    for tag in &rec.tags {
+        out.push(b'\t');
+        out.push(tag.key[0]);
+        out.push(tag.key[1]);
+        out.push(b':');
+        write!(out, "{}", tag.value)?;
+    }
+    Ok(())
+}
+
+/// Appends a CIGAR string to `out`, or `*` when there is none.
+fn write_cigar(out: &mut Vec<u8>, cigar: &[CigarOp]) -> Result<()> {
+    if cigar.is_empty() {
+        out.push(b'*');
+    }
+    for op in cigar {
+        write!(out, "{}", op.len)?;
+        out.push(op.kind.to_char() as u8);
+    }
+    Ok(())
 }
 
 /// Streaming SAM reader. The header is read eagerly by [`SamReader::new`].
@@ -315,6 +338,8 @@ impl<R: BufRead> SamReader<R> {
 pub struct SamWriter<W: Write> {
     inner: W,
     header: Header,
+    /// Reused for each record's line, so writing does not allocate per record.
+    line: Vec<u8>,
 }
 
 impl<W: Write> SamWriter<W> {
@@ -324,7 +349,7 @@ impl<W: Write> SamWriter<W> {
     /// Returns an error on I/O failure.
     pub fn new(mut inner: W, header: Header) -> Result<Self> {
         inner.write_all(header.text().as_bytes())?;
-        Ok(Self { inner, header })
+        Ok(Self { inner, header, line: Vec::with_capacity(256) })
     }
 
     /// Writes one record.
@@ -332,9 +357,10 @@ impl<W: Write> SamWriter<W> {
     /// # Errors
     /// Returns an error if a reference ID is outside the header, or on I/O failure.
     pub fn write_record(&mut self, rec: &Record) -> Result<()> {
-        let line = format_record(rec, &self.header)?;
-        self.inner.write_all(line.as_bytes())?;
-        self.inner.write_all(b"\n")?;
+        self.line.clear();
+        format_record_into(rec, &self.header, &mut self.line)?;
+        self.line.push(b'\n');
+        self.inner.write_all(&self.line)?;
         Ok(())
     }
 

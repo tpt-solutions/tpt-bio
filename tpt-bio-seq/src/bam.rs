@@ -154,13 +154,14 @@ impl<'a> RecordView<'a> {
     #[must_use]
     pub fn seq(&self) -> Vec<u8> {
         let packed = &self.data[self.seq_start()..self.seq_start() + self.l_seq.div_ceil(2)];
-        (0..self.l_seq)
-            .map(|i| {
-                let byte = packed[i / 2];
-                let nib = if i % 2 == 0 { byte >> 4 } else { byte & 0xf };
-                Iupac::from_nibble(nib).map_or(b'N', Iupac::to_ascii)
-            })
-            .collect()
+        let mut out = Vec::with_capacity(self.l_seq);
+        for (i, &byte) in packed.iter().enumerate() {
+            out.push(SEQ_ASCII[usize::from(byte >> 4)]);
+            if 2 * i + 1 < self.l_seq {
+                out.push(SEQ_ASCII[usize::from(byte & 0xf)]);
+            }
+        }
+        out
     }
 
     fn qual_start(&self) -> usize {
@@ -205,6 +206,9 @@ impl<'a> RecordView<'a> {
         })
     }
 }
+
+/// ASCII bases for the 4-bit BAM sequence codes, as `Iupac::to_ascii` gives them.
+const SEQ_ASCII: [u8; 16] = *b"=ACMGRSVTWYHKDBN";
 
 fn le_i32(data: &[u8], at: usize) -> Result<i32> {
     data.get(at..at + 4)
@@ -657,6 +661,14 @@ fn read_u32<R: Read>(r: &mut R) -> Result<u32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn seq_table_matches_iupac_for_every_nibble() {
+        for v in 0..16u8 {
+            let iupac = Iupac::from_nibble(v).expect("every nibble is a code");
+            assert_eq!(SEQ_ASCII[usize::from(v)], iupac.to_ascii(), "nibble {v}");
+        }
+    }
+
     use super::*;
     use crate::record::{CigarKind, CigarOp};
     use crate::sam::SamReader;
