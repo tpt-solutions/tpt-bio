@@ -26,7 +26,7 @@ use crate::cram::reference::CramReference;
 use crate::cram::slice::SliceHeader;
 use crate::error::{Result, SeqError};
 use crate::header::Reference;
-use crate::record::{CigarKind, CigarOp, Flags, Record, Tag};
+use crate::record::{CigarKind, CigarOp, Flags, Record, Tag, TagValue};
 
 /// Longest read length accepted from a CRAM file. Real reads are far shorter.
 const MAX_READ_LEN: usize = 1 << 24;
@@ -288,12 +288,28 @@ pub struct SliceDecoder<'a> {
     series: &'a Series,
     reader: DataReader,
     refs: &'a [Reference],
+    read_groups: &'a [String],
     reference: Option<&'a CramReference>,
     slice_ref_id: i32,
     prev_ap: i64,
 }
 
 impl SliceDecoder<'_> {
+    /// Decodes the tag values for one tag line, in dictionary order.
+    fn read_tag_values(&mut self, keys: &[[u8; 3]]) -> Result<Vec<Tag>> {
+        let series = self.series;
+        let mut tags: Vec<Tag> = Vec::new();
+        for key in keys {
+            let codec = series.tags.get(key).unwrap_or(&NULL);
+            let value = self.reader.byte_array(codec)?;
+            let mut buf = Vec::with_capacity(3 + value.len());
+            buf.extend_from_slice(key);
+            buf.extend_from_slice(&value);
+            tags.extend(decode_tags(&buf)?);
+        }
+        Ok(tags)
+    }
+
     fn read_int(&mut self, key: [u8; 2]) -> Result<i32> {
         let series = self.series;
         self.reader.int(series.series(&key))
@@ -351,7 +367,7 @@ impl SliceDecoder<'_> {
             ap
         };
         let pos = ap - 1;
-        let _read_group = self.read_int(*b"RG")?;
+        let read_group = self.read_int(*b"RG")?;
         let name = if series.read_names { self.read_array(*b"RN")? } else { Vec::new() };
 
         let mut flags = u16::try_from(bf)
@@ -383,14 +399,11 @@ impl SliceDecoder<'_> {
             .ok()
             .and_then(|i| series.tag_lines.get(i))
             .ok_or_else(|| SeqError::malformed(FORMAT, format!("tag line {tag_line} not found")))?;
-        let mut tags: Vec<Tag> = Vec::new();
-        for key in keys {
-            let codec = series.tags.get(key).unwrap_or(&NULL);
-            let value = self.reader.byte_array(codec)?;
-            let mut buf = Vec::with_capacity(3 + value.len());
-            buf.extend_from_slice(&key[..3]);
-            buf.extend_from_slice(&value);
-            tags.extend(decode_tags(&buf)?);
+        let mut tags = self.read_tag_values(keys)?;
+        // The RG series holds an index into the header's @RG lines. samtools writes it
+        // as the RG tag, after the tags from the tag list.
+        if let Some(id) = usize::try_from(read_group).ok().and_then(|i| self.read_groups.get(i)) {
+            tags.push(Tag { key: *b"RG", value: TagValue::String(id.as_bytes().to_vec()) });
         }
 
         let mapped = flags & Flags::UNMAPPED == 0;
@@ -427,6 +440,10 @@ impl SliceDecoder<'_> {
         // 0xFF in every position is the BAM convention for "no qualities".
         let qual = if quals.iter().all(|&q| q == 0xFF) { Vec::new() } else { quals };
 
+        if mapped {
+            self.add_md_nm(&mut tags, ref_id, pos, &seq, &cigar)?;
+        }
+
         let rec = Record {
             name,
             flags: Flags(flags),
@@ -442,6 +459,40 @@ impl SliceDecoder<'_> {
             tags,
         };
         Ok((rec, downstream))
+    }
+
+    /// Adds NM and MD when the file leaves them out, as samtools does on decode.
+    /// Both are derived from the reference, so this needs one.
+    fn add_md_nm(
+        &self,
+        tags: &mut Vec<Tag>,
+        ref_id: i32,
+        pos: i64,
+        seq: &[u8],
+        cigar: &[CigarOp],
+    ) -> Result<()> {
+        let has = |tags: &[Tag], key: &[u8; 2]| tags.iter().any(|t| &t.key == key);
+        if has(tags, b"NM") && has(tags, b"MD") {
+            return Ok(());
+        }
+        let (Some(reference), true) = (self.reference, ref_id >= 0 && pos >= 0) else {
+            return Ok(());
+        };
+        let name = self
+            .refs
+            .get(ref_id as usize)
+            .map(|r| r.name.as_str())
+            .ok_or_else(|| SeqError::malformed(FORMAT, "reference id not in header"))?;
+        let span = crate::record::reference_length(cigar);
+        let ref_bases = reference.fetch(name, pos as u64, pos as u64 + span)?;
+        let (nm, md) = md_and_nm(&ref_bases, seq, cigar);
+        if !has(tags, b"MD") {
+            tags.push(Tag { key: *b"MD", value: TagValue::String(md) });
+        }
+        if !has(tags, b"NM") {
+            tags.push(Tag { key: *b"NM", value: TagValue::Int(nm) });
+        }
+        Ok(())
     }
 
     /// Rebuilds bases, CIGAR and qualities for a mapped read.
@@ -515,6 +566,7 @@ pub fn decode_slice(
     sh: &SliceHeader,
     blocks: Vec<Block>,
     refs: &[Reference],
+    read_groups: &[String],
     reference: Option<&CramReference>,
 ) -> Result<Vec<Record>> {
     if sh.embedded_ref_id.is_some() {
@@ -547,6 +599,7 @@ pub fn decode_slice(
         series,
         reader: DataReader::new(core, externals),
         refs,
+        read_groups,
         reference,
         slice_ref_id: sh.ref_id,
         prev_ap: i64::from(sh.start),
@@ -571,4 +624,56 @@ pub fn decode_slice(
         }
     }
     Ok(records)
+}
+
+/// Computes the NM and MD tags of an alignment from its reference bases.
+///
+/// NM counts mismatches and inserted and deleted bases. MD is the run of matching
+/// bases, then the reference base at each mismatch, with deleted bases written as
+/// `^` followed by the reference bases. Runs of zero are written, as the spec requires.
+fn md_and_nm(ref_bases: &[u8], seq: &[u8], cigar: &[CigarOp]) -> (i64, Vec<u8>) {
+    let mut nm = 0i64;
+    let mut md = Vec::new();
+    let mut run = 0u32;
+    let (mut rpos, mut qpos) = (0usize, 0usize);
+    for op in cigar {
+        let n = op.len as usize;
+        match op.kind {
+            CigarKind::Match | CigarKind::SeqMatch | CigarKind::SeqMismatch => {
+                for _ in 0..n {
+                    let r = ref_bases.get(rpos).map_or(b'N', u8::to_ascii_uppercase);
+                    let q = seq.get(qpos).map_or(b'N', u8::to_ascii_uppercase);
+                    if r == q {
+                        run += 1;
+                    } else {
+                        md.extend_from_slice(run.to_string().as_bytes());
+                        md.push(r);
+                        run = 0;
+                        nm += 1;
+                    }
+                    rpos += 1;
+                    qpos += 1;
+                }
+            }
+            CigarKind::Insertion => {
+                nm += i64::from(op.len);
+                qpos += n;
+            }
+            CigarKind::Deletion => {
+                nm += i64::from(op.len);
+                md.extend_from_slice(run.to_string().as_bytes());
+                md.push(b'^');
+                for i in 0..n {
+                    md.push(ref_bases.get(rpos + i).map_or(b'N', u8::to_ascii_uppercase));
+                }
+                run = 0;
+                rpos += n;
+            }
+            CigarKind::Skip => rpos += n,
+            CigarKind::SoftClip => qpos += n,
+            CigarKind::HardClip | CigarKind::Pad => {}
+        }
+    }
+    md.extend_from_slice(run.to_string().as_bytes());
+    (nm, md)
 }

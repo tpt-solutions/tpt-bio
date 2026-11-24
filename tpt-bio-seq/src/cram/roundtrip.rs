@@ -199,6 +199,22 @@ fn write_all(
     w.finish().unwrap()
 }
 
+/// The decoder adds NM and MD when the file omits them, as samtools does. This drops
+/// those tags from `got` wherever `want` does not have them, so a round trip compares
+/// the stored data.
+fn without_derived_tags(got: Vec<Record>, want: &[Record]) -> Vec<Record> {
+    got.into_iter()
+        .zip(want)
+        .map(|(mut g, w)| {
+            g.tags.retain(|t| {
+                let derived = t.key == *b"MD" || t.key == *b"NM";
+                !derived || w.tags.iter().any(|x| x.key == t.key)
+            });
+            g
+        })
+        .collect()
+}
+
 fn read_all<R: std::io::Read>(mut r: CramReader<R>) -> Result<Vec<Record>, SeqError> {
     let mut out = Vec::new();
     while let Some(rec) = r.next_record()? {
@@ -231,7 +247,7 @@ fn reference_roundtrip_with_multiple_slices_and_containers() {
     );
     let bytes = write_all(&records, Some(reference.clone()), 3, 2);
     let got = read_all(CramReader::with_reference(Cursor::new(bytes), reference).unwrap()).unwrap();
-    assert_eq!(got, records);
+    assert_eq!(without_derived_tags(got, &records), records);
 }
 
 #[test]
@@ -301,6 +317,7 @@ fn bam_cram_bam_is_lossless() {
     let from_cram =
         read_all(CramReader::with_reference(Cursor::new(cram), reference).unwrap()).unwrap();
 
+    let from_cram = without_derived_tags(from_cram, &from_bam);
     let mut bw = BamWriter::new(Vec::new(), header()).unwrap();
     for r in &from_cram {
         bw.write_record(r).unwrap();

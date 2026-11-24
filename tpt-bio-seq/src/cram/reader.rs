@@ -277,6 +277,8 @@ impl<R: Read> CramReader<R> {
         let expected = raw.header.n_records;
         let (comp, units) = split_container(raw)?;
         let series = Series::new(&comp)?;
+        let read_groups: Vec<String> =
+            self.header.read_groups().filter_map(|r| r.get("ID").map(str::to_owned)).collect();
         let mut out = Vec::new();
         for u in units {
             let recs = decode::decode_slice(
@@ -284,6 +286,7 @@ impl<R: Read> CramReader<R> {
                 &u.header,
                 u.blocks,
                 self.header.references(),
+                &read_groups,
                 self.reference.as_ref(),
             )?;
             out.extend(recs);

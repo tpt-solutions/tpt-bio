@@ -40,8 +40,18 @@ use crate::record::{CigarKind, Flags, Record, TagValue, query_length, reference_
 const FORMAT: &str = "CRAM writer";
 /// Substitution matrix written to the preservation map: alternative `i` has code `i`.
 const SUBSTITUTION_MATRIX: [u8; 5] = [0x1B; 5];
-/// Alignment start written for the end-of-file container.
-const EOF_START: i32 = 4_542_278;
+/// The CRAM 3.0 end-of-file container, byte for byte as samtools and htslib write
+/// it. Readers check for it, so it is written verbatim rather than built.
+const EOF_CONTAINER_V3: [u8; 38] = [
+    0x0f, 0x00, 0x00, 0x00, // container length 15
+    0xff, 0xff, 0xff, 0xff, // reference id -1
+    0x0f, // alignment start 4542278 ("EOF") as ITF8
+    0xe0, 0x45, 0x4f, 0x46, //
+    0x00, 0x00, 0x00, 0x00, // span, record count, record counter
+    0x01, 0x00, 0x05, 0xbd, 0xd9, 0x4f, 0x00, // bases, block count, landmarks, crc32
+    0x01, 0x00, 0x06, 0x06, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, // empty compression header
+    0xee, 0x63, 0x01, 0x4b, // block crc32
+];
 
 /// How a data series is stored.
 #[derive(Clone, Copy)]
@@ -528,21 +538,7 @@ impl<W: Write> CramWriter<W> {
     /// Returns an error if a write fails.
     pub fn finish(mut self) -> Result<W> {
         self.flush()?;
-        let plan = Plan::new();
-        let comp = compression::write(&plan.compression_header(false));
-        let mut blocks = Vec::new();
-        block::write_block(Method::Raw, content::COMPRESSION_HEADER, 0, &comp, &mut blocks)?;
-        let fields = ContainerFields {
-            ref_id: -1,
-            start: EOF_START,
-            span: 0,
-            n_records: 0,
-            record_counter: 0,
-            n_bases: 0,
-            landmarks: Vec::new(),
-            n_blocks: 1,
-        };
-        write_container(&mut self.inner, &fields, &blocks)?;
+        self.inner.write_all(&EOF_CONTAINER_V3)?;
         self.inner.flush()?;
         Ok(self.inner)
     }
