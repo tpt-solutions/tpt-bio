@@ -2,6 +2,7 @@
 //!
 //! Implemented so far:
 //! - [`filter`]: separable 2D convolution and Gaussian blur on `tpt-simd`.
+//! - [`simd`]: CPU feature detection and the backend name, with the `scalar-only` fallback.
 //! - [`sigv4`]: AWS Signature Version 4 request signing for remote object storage,
 //!   using `tpt-crypto`'s SHA-256 and HMAC.
 //! - [`source`]: the [`source::ByteSource`] trait, with in-memory and local-file sources.
@@ -44,6 +45,7 @@ pub mod morph;
 pub mod objects;
 pub mod render3d;
 pub mod seeds;
+pub mod simd;
 pub mod shape3d;
 pub mod sigv4;
 pub mod source;

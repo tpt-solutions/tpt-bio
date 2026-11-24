@@ -10,6 +10,10 @@ readme = "README.md"
 keywords = ["bioimaging", "image-analysis", "segmentation", "microscopy", "zarr"]
 categories = ["science", "multimedia::images"]
 
+[features]
+# Forces tpt-simd's scalar kernels, to test the fallback path on any CPU.
+scalar-only = ["tpt-simd/scalar-only"]
+
 [dependencies]
 tpt-bio-core.workspace = true
 tpt-bio-seq.workspace = true
