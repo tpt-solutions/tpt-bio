@@ -1,0 +1,495 @@
+//! GPU ray casting with wgpu, behind the `gpu` feature.
+//!
+//! [`GpuRenderer::render`] produces the same image as [`super::raycast::render_volume`]. Ray
+//! setup and box clipping run on the CPU, using the same code as the CPU renderer. The
+//! marching runs in a WGSL compute shader (`raycast.wgsl`): trilinear sampling, the
+//! per-channel transfer functions, clip plane and front-to-back compositing.
+//!
+//! Each channel's transfer function is evaluated on the CPU into a lookup table of
+//! [`LUT_LEN`] entries across its window, and the shader interpolates between entries. The
+//! output therefore matches the CPU renderer to within the table spacing, not bit for bit.
+//!
+//! Volumes are uploaded as one storage buffer, so they are limited by the adapter's maximum
+//! storage buffer binding size. Larger volumes need the streamed levels in [`super::stream`].
+
+use std::fmt;
+use std::future::Future;
+use std::pin::pin;
+use std::sync::mpsc;
+use std::task::{Context, Poll, Waker};
+
+use wgpu::util::DeviceExt;
+
+use super::RenderError;
+use super::camera::Camera;
+use super::raycast::{OPACITY_CUTOFF, RenderSettings, check_inputs, finish, intersect_box, ortho_back};
+use super::transfer::TransferFunction;
+use super::volume::Volume;
+use super::Rgba8;
+use crate::image::Image;
+
+/// Entries in each channel's transfer lookup table.
+pub const LUT_LEN: usize = 4096;
+
+const SHADER: &str = include_str!("raycast.wgsl");
+const WORKGROUP: u32 = 8;
+
+/// Errors from GPU rendering.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GpuError {
+    /// No GPU adapter is available on this machine.
+    NoAdapter(String),
+    /// The device could not be created.
+    Device(String),
+    /// The buffers or pipeline could not be used. The message says what failed.
+    Gpu(String),
+    /// The scene is invalid, or too large for the adapter.
+    Render(RenderError),
+}
+
+impl fmt::Display for GpuError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoAdapter(m) => write!(f, "no GPU adapter: {m}"),
+            Self::Device(m) => write!(f, "GPU device: {m}"),
+            Self::Gpu(m) => write!(f, "GPU: {m}"),
+            Self::Render(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for GpuError {}
+
+impl From<RenderError> for GpuError {
+    fn from(e: RenderError) -> Self {
+        Self::Render(e)
+    }
+}
+
+/// A wgpu device with the ray-marching pipeline ready.
+pub struct GpuRenderer {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    pipeline: wgpu::ComputePipeline,
+    layout: wgpu::BindGroupLayout,
+    adapter_name: String,
+    max_binding: u64,
+}
+
+impl fmt::Debug for GpuRenderer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GpuRenderer").field("adapter", &self.adapter_name).finish_non_exhaustive()
+    }
+}
+
+impl GpuRenderer {
+    /// Opens the default high-performance adapter and builds the pipeline.
+    ///
+    /// # Errors
+    /// Returns [`GpuError::NoAdapter`] when no adapter exists, and [`GpuError::Device`] when
+    /// the device request fails.
+    pub fn new() -> Result<Self, GpuError> {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            force_fallback_adapter: false,
+            compatible_surface: None,
+        }))
+        .map_err(|e| GpuError::NoAdapter(e.to_string()))?;
+        let adapter_name = adapter.get_info().name;
+        let limits = adapter.limits();
+        let max_binding = u64::from(limits.max_storage_buffer_binding_size);
+        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("tpt-bio-vision render3d"),
+            required_features: wgpu::Features::empty(),
+            required_limits: limits,
+            memory_hints: wgpu::MemoryHints::Performance,
+            trace: wgpu::Trace::Off,
+        }))
+        .map_err(|e| GpuError::Device(e.to_string()))?;
+
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("render3d raycast"),
+            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+        });
+        let entry = |binding: u32, ty: wgpu::BufferBindingType| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None },
+            count: None,
+        };
+        let read_only = wgpu::BufferBindingType::Storage { read_only: true };
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("render3d raycast layout"),
+            entries: &[
+                entry(0, wgpu::BufferBindingType::Uniform),
+                entry(1, read_only),
+                entry(2, read_only),
+                entry(3, read_only),
+                entry(4, read_only),
+                entry(5, wgpu::BufferBindingType::Storage { read_only: false }),
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("render3d raycast pipeline layout"),
+            bind_group_layouts: &[&layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("render3d raycast"),
+            layout: Some(&pipeline_layout),
+            module: &module,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+        Ok(Self { device, queue, pipeline, layout, adapter_name, max_binding })
+    }
+
+    /// Name of the adapter in use.
+    #[must_use]
+    pub fn adapter_name(&self) -> &str {
+        &self.adapter_name
+    }
+
+    /// Renders `volume` through `tf` from `camera`, like [`super::raycast::render_volume`].
+    ///
+    /// # Errors
+    /// Returns [`GpuError::Render`] for invalid inputs or a volume larger than the adapter's
+    /// storage binding limit, and [`GpuError::Gpu`] when a buffer or readback fails.
+    #[allow(clippy::too_many_lines)] // Sequential setup and readback; splitting would only move the lines.
+    pub fn render(
+        &self,
+        volume: &Volume,
+        camera: &Camera,
+        tf: &TransferFunction,
+        settings: &RenderSettings,
+    ) -> Result<Image<Rgba8>, GpuError> {
+        check_inputs(volume, camera, tf, settings)?;
+        let (w, h) = camera.viewport;
+        let channels = volume.channel_count();
+        let voxels = volume.shape().0 * volume.shape().1 * volume.shape().2;
+        let volume_bytes = (voxels * channels * 4) as u64;
+        if volume_bytes > self.max_binding {
+            return Err(GpuError::Render(RenderError::InvalidParameter(
+                "volume exceeds the GPU storage binding limit; use a streamed level",
+            )));
+        }
+
+        // Rays: origin and clipped t range, then direction and t range, per pixel.
+        let back = ortho_back(volume, camera);
+        let mut rays = Vec::with_capacity(w * h * 2);
+        for y in 0..h {
+            for x in 0..w {
+                let ray = camera.ray(x as f64 + 0.5, y as f64 + 0.5, back);
+                let (t0, t1) = intersect_box(&ray, volume.extent()).unwrap_or((0.0, 0.0));
+                let o = ray.origin;
+                let d = ray.dir;
+                rays.push([o[0] as f32, o[1] as f32, o[2] as f32, t0.max(0.0) as f32]);
+                rays.push([d[0] as f32, d[1] as f32, d[2] as f32, t1 as f32]);
+            }
+        }
+
+        let mut voxel_data = Vec::with_capacity(voxels * channels);
+        for c in 0..channels {
+            voxel_data.extend_from_slice(volume.channel(c).ok_or(RenderError::ChannelIndex(c))?.data());
+        }
+
+        let mut lut = Vec::with_capacity(channels * LUT_LEN);
+        let mut windows = Vec::with_capacity(channels);
+        for ch in &tf.channels {
+            let (lo, hi) = ch.window;
+            windows.push([lo, hi]);
+            for i in 0..LUT_LEN {
+                let v = lo + (hi - lo) * i as f32 / (LUT_LEN - 1) as f32;
+                let (c, a) = ch.evaluate(v);
+                lut.push([c[0], c[1], c[2], a]);
+            }
+        }
+
+        let spacing = volume.spacing();
+        let (clip_on, clip) = match tf.clip {
+            Some(p) => (1u32, [p.normal[0] as f32, p.normal[1] as f32, p.normal[2] as f32, p.offset as f32]),
+            None => (0, [0.0; 4]),
+        };
+        let (dw, dh, dd) = volume.shape();
+        let params = pack_params(
+            [dw as u32, dh as u32, dd as u32, channels as u32],
+            [spacing[0] as f32, spacing[1] as f32, spacing[2] as f32, settings.step as f32],
+            [LUT_LEN as u32, clip_on, w as u32, h as u32],
+            clip,
+            OPACITY_CUTOFF,
+        );
+
+        let usage = wgpu::BufferUsages::STORAGE;
+        let uniform = self.buffer("params", &params, wgpu::BufferUsages::UNIFORM);
+        let vol_buf = self.buffer("volume", &floats_bytes(&voxel_data), usage);
+        let rays_buf = self.buffer("rays", &vec4_bytes(&rays), usage);
+        let lut_buf = self.buffer("lut", &vec4_bytes(&lut), usage);
+        let win_buf = self.buffer("windows", &floats_bytes(&windows.concat()), usage);
+
+        let out_size = (w * h * 16) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("render3d output"),
+            size: out_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("render3d staging"),
+            size: out_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("render3d bind group"),
+            layout: &self.layout,
+            entries: &[
+                bind_entry(0, &uniform),
+                bind_entry(1, &vol_buf),
+                bind_entry(2, &rays_buf),
+                bind_entry(3, &lut_buf),
+                bind_entry(4, &win_buf),
+                bind_entry(5, &out_buf),
+            ],
+        });
+
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("render3d encoder"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("render3d raycast"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.dispatch_workgroups(
+                (w as u32).div_ceil(WORKGROUP),
+                (h as u32).div_ceil(WORKGROUP),
+                1,
+            );
+        }
+        encoder.copy_buffer_to_buffer(&out_buf, 0, &staging, 0, out_size);
+        self.queue.submit(Some(encoder.finish()));
+
+        let slice = staging.slice(..);
+        let (tx, rx) = mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        self.device
+            .poll(wgpu::PollType::wait())
+            .map_err(|e| GpuError::Gpu(format!("poll failed: {e}")))?;
+        rx.recv()
+            .map_err(|_| GpuError::Gpu("map callback was dropped".into()))?
+            .map_err(|e| GpuError::Gpu(format!("readback map failed: {e}")))?;
+
+        let mapped = slice.get_mapped_range();
+        let pixels: Vec<Rgba8> = mapped
+            .chunks_exact(16)
+            .map(|px| {
+                let f = |i: usize| f32::from_le_bytes([px[i * 4], px[i * 4 + 1], px[i * 4 + 2], px[i * 4 + 3]]);
+                finish([f(0), f(1), f(2)], f(3), settings.background)
+            })
+            .collect();
+        drop(mapped);
+        staging.unmap();
+        Image::new_2d(w, h, pixels).map_err(|e| GpuError::Render(e.into()))
+    }
+
+    fn buffer(&self, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> wgpu::Buffer {
+        self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents,
+            usage,
+        })
+    }
+}
+
+fn bind_entry(binding: u32, buffer: &wgpu::Buffer) -> wgpu::BindGroupEntry<'_> {
+    wgpu::BindGroupEntry { binding, resource: buffer.as_entire_binding() }
+}
+
+/// Packs the five `vec4` fields of the shader's `Params` struct, 80 bytes in total.
+fn pack_params(dims: [u32; 4], spacing_step: [f32; 4], counts: [u32; 4], clip: [f32; 4], cutoff: f32) -> [u8; 80] {
+    let mut out = [0u8; 80];
+    let mut at = 0;
+    for v in dims {
+        out[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        at += 4;
+    }
+    for v in spacing_step {
+        out[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        at += 4;
+    }
+    for v in counts {
+        out[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        at += 4;
+    }
+    for v in clip {
+        out[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        at += 4;
+    }
+    for v in [cutoff, 0.0, 0.0, 0.0] {
+        out[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        at += 4;
+    }
+    out
+}
+
+fn floats_bytes(values: &[f32]) -> Vec<u8> {
+    values.iter().flat_map(|v| v.to_le_bytes()).collect()
+}
+
+fn vec4_bytes(values: &[[f32; 4]]) -> Vec<u8> {
+    values.iter().flat_map(|v| v.iter().flat_map(|c| c.to_le_bytes())).collect()
+}
+
+/// Polls `fut` to completion on the current thread. wgpu's native futures complete while the
+/// device is polled, so this loop yields between polls.
+fn block_on<F: Future>(fut: F) -> F::Output {
+    let mut cx = Context::from_waker(Waker::noop());
+    let mut fut = pin!(fut);
+    loop {
+        if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
+            return v;
+        }
+        std::thread::yield_now();
+    }
+}
+
+#[allow(clippy::float_cmp)]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render3d::camera::Projection;
+    use crate::render3d::raycast::render_volume;
+    use crate::render3d::transfer::{ChannelTransfer, ClipPlane};
+
+    /// A renderer, or `None` when this machine has no GPU adapter. Tests then skip, and the
+    /// message says so.
+    fn renderer() -> Option<GpuRenderer> {
+        match GpuRenderer::new() {
+            Ok(r) => {
+                eprintln!("render3d gpu tests on adapter: {}", r.adapter_name());
+                Some(r)
+            }
+            Err(e) => {
+                eprintln!("SKIPPING render3d GPU test: {e}");
+                None
+            }
+        }
+    }
+
+    /// Two channels: a bright ball and a dim shell, on an odd-sized grid.
+    fn ball_volume() -> Volume {
+        let (w, h, d) = (13, 11, 9);
+        let mut a = Vec::with_capacity(w * h * d);
+        let mut b = Vec::with_capacity(w * h * d);
+        for z in 0..d {
+            for y in 0..h {
+                for x in 0..w {
+                    let r2 = (x as f32 - 6.0).powi(2) + (y as f32 - 5.0).powi(2) + (z as f32 - 4.0).powi(2);
+                    a.push(200.0 * (-r2 / 12.0).exp());
+                    b.push(90.0 * (-(r2 - 20.0).powi(2) / 30.0).exp());
+                }
+            }
+        }
+        Volume::new(
+            vec![Image::new_3d(w, h, d, a).unwrap(), Image::new_3d(w, h, d, b).unwrap()],
+            [1.0, 1.2, 0.8],
+        )
+        .unwrap()
+    }
+
+    fn two_channel_tf(clip: Option<ClipPlane>) -> TransferFunction {
+        let mut red = ChannelTransfer::new([1.0, 0.2, 0.1], (0.0, 200.0));
+        red.opacity = vec![(0.0, 0.0), (0.5, 0.4), (1.0, 0.9)];
+        let mut green = ChannelTransfer::new([0.1, 1.0, 0.3], (0.0, 90.0));
+        green.opacity = vec![(0.0, 0.0), (1.0, 0.3)];
+        green.gain = 0.8;
+        TransferFunction { channels: vec![red, green], clip }
+    }
+
+    fn assert_close(cpu: &Image<Rgba8>, gpu: &Image<Rgba8>, tolerance: i32) {
+        assert_eq!(cpu.shape(), gpu.shape());
+        let mut worst = 0;
+        for (a, b) in cpu.data().iter().zip(gpu.data()) {
+            for c in 0..4 {
+                worst = worst.max((i32::from(a[c]) - i32::from(b[c])).abs());
+            }
+        }
+        assert!(worst <= tolerance, "max channel difference {worst} exceeds {tolerance}");
+    }
+
+    #[test]
+    fn render3d_gpu_matches_cpu_perspective_two_channels() {
+        let Some(gpu) = renderer() else { return };
+        let vol = ball_volume();
+        let cam = Camera {
+            target: [6.0, 5.0, 4.0],
+            yaw: 0.6,
+            pitch: 0.3,
+            distance: 30.0,
+            projection: Projection::Perspective { fov_y: 0.9 },
+            viewport: (48, 40),
+        };
+        let tf = two_channel_tf(None);
+        let settings = RenderSettings { step: 0.5, background: [10, 20, 30] };
+        let cpu = render_volume(&vol, &cam, &tf, &settings).unwrap();
+        let got = gpu.render(&vol, &cam, &tf, &settings).unwrap();
+        assert_close(&cpu, &got, 3);
+    }
+
+    #[test]
+    fn render3d_gpu_matches_cpu_orthographic_with_clip() {
+        let Some(gpu) = renderer() else { return };
+        let vol = ball_volume();
+        let cam = Camera {
+            target: [6.0, 5.0, 4.0],
+            yaw: 0.2,
+            pitch: -0.4,
+            distance: 40.0,
+            projection: Projection::Orthographic { height: 14.0 },
+            viewport: (36, 36),
+        };
+        let clip = ClipPlane { normal: [1.0, 0.3, 0.0], offset: -5.0 };
+        let tf = two_channel_tf(Some(clip));
+        let settings = RenderSettings::new(0.7);
+        let cpu = render_volume(&vol, &cam, &tf, &settings).unwrap();
+        let got = gpu.render(&vol, &cam, &tf, &settings).unwrap();
+        assert_close(&cpu, &got, 3);
+    }
+
+    #[test]
+    fn render3d_gpu_rejects_channel_mismatch_without_dispatch() {
+        let Some(gpu) = renderer() else { return };
+        let vol = ball_volume();
+        let cam = Camera {
+            target: [0.0; 3],
+            yaw: 0.0,
+            pitch: 0.0,
+            distance: 10.0,
+            projection: Projection::Orthographic { height: 4.0 },
+            viewport: (4, 4),
+        };
+        let tf = TransferFunction {
+            channels: vec![ChannelTransfer::new([1.0; 3], (0.0, 1.0))],
+            clip: None,
+        };
+        let err = gpu.render(&vol, &cam, &tf, &RenderSettings::new(1.0)).unwrap_err();
+        assert!(matches!(err, GpuError::Render(RenderError::ChannelMismatch { .. })));
+    }
+
+    #[test]
+    fn render3d_gpu_pack_params_layout_is_80_bytes() {
+        let p = pack_params([1, 2, 3, 4], [0.5; 4], [7, 1, 0, 0], [0.0; 4], 0.99);
+        assert_eq!(&p[0..4], &1u32.to_le_bytes());
+        assert_eq!(&p[12..16], &4u32.to_le_bytes());
+        assert_eq!(&p[16..20], &0.5f32.to_le_bytes());
+        assert_eq!(&p[32..36], &7u32.to_le_bytes());
+        assert_eq!(&p[64..68], &0.99f32.to_le_bytes());
+    }
+}

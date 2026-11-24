@@ -41,7 +41,7 @@ to a commit.
 | `tiff` | 0.11.3 | MIT | Planned, Phase 3 (OME-TIFF). |
 | `ndarray` | 0.17.2 | MIT OR Apache-2.0 | Planned. |
 | `numpy` (rust-numpy) | 0.30.0 | BSD-2-Clause | Planned (Python interop). |
-| `wgpu` | 26.0.1 | MIT OR Apache-2.0 | Planned, Phase 4. The latest is 30.0.2; check its MSRV before upgrading. |
+| `wgpu` | 26.0.1 | MIT OR Apache-2.0 | **Rejected.** Its tree includes `codespan-reporting` (Apache-2.0 only, a non-optional dependency of naga), `gl_generator`, `glutin_wgl_sys` (Apache-2.0 only), `hexf-parse` (CC0-1.0) and `paste` (RUSTSEC-2024-0436). No feature selection removes them. Browser WebGPU will use `web-sys` instead. |
 | `ureq` | 3.5.2 | MIT OR Apache-2.0 | Planned, HTTP range reads. Its TLS stack still needs a decision (see below). |
 | `serde`, `toml` | 1.0.229, 1.2.2 | MIT OR Apache-2.0 | Planned, pipeline definitions. |
 | `tpt-benchmark` (git) | 0.1.0 | MIT OR Apache-2.0 | **Adopted**, dev-dependency for benchmarks (`tpt-bio-seq`). Replaced `criterion`. Pinned to `8384f44` of `tpt-solutions/tpt-benchmark`, which is not yet on crates.io. |
