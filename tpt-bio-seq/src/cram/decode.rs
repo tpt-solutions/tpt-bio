@@ -28,6 +28,9 @@ use crate::error::{Result, SeqError};
 use crate::header::Reference;
 use crate::record::{CigarKind, CigarOp, Flags, Record, Tag};
 
+/// Longest read length accepted from a CRAM file. Real reads are far shorter.
+const MAX_READ_LEN: usize = 1 << 24;
+
 const FORMAT: &str = "CRAM record";
 const NULL: Codec = Codec::Null;
 /// The bases that substitution codes index into, for each reference base.
@@ -463,6 +466,13 @@ impl SliceDecoder<'_> {
             }
             _ => None,
         };
+        // The length comes from the file. Refuse absurd reads before allocating for them.
+        if read_len > MAX_READ_LEN {
+            return Err(SeqError::malformed(
+                FORMAT,
+                format!("read length {read_len} is too large"),
+            ));
+        }
         let mut b = Rebuild {
             read_len,
             window: window.as_deref(),

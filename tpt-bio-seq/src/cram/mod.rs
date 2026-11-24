@@ -3,7 +3,7 @@
 //! Implemented: ITF8/LTF8 integers and CRC32 ([`bytes`]), block framing with
 //! raw, gzip and rANS methods, compression and slice headers, data-series value
 //! decoding, read-feature record decoding with reference reconstruction, the
-//! [`CramReader`] and a [`CramWriter`] for the subset described in their docs.
+//! [`reader::CramReader`] and a [`writer::CramWriter`] for the subset described in their docs.
 
 pub mod block;
 pub mod bytes;
@@ -15,6 +15,7 @@ pub mod decode;
 pub mod huffman;
 pub mod md5;
 pub mod rans;
+pub mod rans_nx16;
 pub mod reader;
 pub mod reference;
 pub mod slice;

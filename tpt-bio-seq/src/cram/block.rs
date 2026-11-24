@@ -4,16 +4,16 @@
 //! size (ITF8), raw size (ITF8), payload, then CRC32 (u32 LE) over every byte of
 //! the block before the checksum.
 //!
-//! Methods: 0 raw, 1 gzip, 4 rANS 4x8. Methods 2 (bzip2) and 3 (LZMA) are
-//! reported as [`SeqError::Unsupported`]: no audited pure-Rust, permissively
-//! licensed implementation is in the workspace.
+//! Methods: 0 raw, 1 gzip, 4 rANS 4x8 (orders 0 and 1), 5 rANS Nx16. Methods 2
+//! (bzip2) and 3 (LZMA) are reported as [`SeqError::Unsupported`]: no audited
+//! pure-Rust, permissively licensed implementation is in the workspace.
 
 use std::io::{Read, Write};
 
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 
 use crate::cram::bytes::{Cursor, crc32, put_itf8};
-use crate::cram::rans;
+use crate::cram::{rans, rans_nx16};
 use crate::error::{Result, SeqError};
 
 const FORMAT: &str = "CRAM block";
@@ -29,8 +29,10 @@ pub enum Method {
     Bzip2,
     /// LZMA. Not supported.
     Lzma,
-    /// rANS 4x8.
+    /// rANS 4x8 (orders 0 and 1).
     Rans4x8,
+    /// rANS Nx16 (CRAM 3.1).
+    RansNx16,
 }
 
 impl Method {
@@ -41,6 +43,7 @@ impl Method {
             2 => Self::Bzip2,
             3 => Self::Lzma,
             4 => Self::Rans4x8,
+            5 => Self::RansNx16,
             _ => return Err(SeqError::malformed(FORMAT, format!("unknown method {c}"))),
         })
     }
@@ -52,6 +55,7 @@ impl Method {
             Self::Bzip2 => 2,
             Self::Lzma => 3,
             Self::Rans4x8 => 4,
+            Self::RansNx16 => 5,
         }
     }
 }
@@ -87,6 +91,10 @@ pub struct Block {
 /// Returns [`SeqError::Unsupported`] for bzip2 and LZMA, and
 /// [`SeqError::Malformed`] on corrupt data or a size mismatch.
 pub fn decompress(method: Method, payload: &[u8], raw_size: usize) -> Result<Vec<u8>> {
+    // The size is untrusted: refuse impossible sizes before any buffer is reserved.
+    if raw_size > super::rans::MAX_OUTPUT {
+        return Err(SeqError::malformed("CRAM", format!("block size {raw_size} is too large")));
+    }
     let out = match method {
         Method::Raw => payload.to_vec(),
         Method::Gzip => {
@@ -97,6 +105,7 @@ pub fn decompress(method: Method, payload: &[u8], raw_size: usize) -> Result<Vec
             out
         }
         Method::Rans4x8 => rans::decode(payload)?,
+        Method::RansNx16 => rans_nx16::decode(payload, raw_size)?,
         Method::Bzip2 => {
             return Err(SeqError::Unsupported("CRAM block method bzip2 (method 2)".into()));
         }
@@ -157,6 +166,7 @@ pub fn write_block(
             enc.finish()?
         }
         Method::Rans4x8 => rans::encode_o0(raw),
+        Method::RansNx16 => rans_nx16::encode(raw, false, false),
         Method::Bzip2 | Method::Lzma => {
             return Err(SeqError::Unsupported("writing bzip2 or LZMA blocks".into()));
         }
@@ -198,6 +208,35 @@ mod tests {
         buf[n - 6] ^= 0x01;
         let err = read_block(&mut Cursor::new(&buf)).unwrap_err();
         assert!(matches!(err, SeqError::Malformed { .. }));
+    }
+
+    /// Frames `payload` as a block with the given method code, for tests that
+    /// need a payload the writer does not produce.
+    fn frame_block(code: u8, payload: &[u8], raw_len: usize) -> Vec<u8> {
+        let mut buf = vec![code, content::CORE_DATA];
+        put_itf8(&mut buf, 0);
+        put_itf8(&mut buf, payload.len() as i32);
+        put_itf8(&mut buf, raw_len as i32);
+        buf.extend_from_slice(payload);
+        let sum = crc32(&buf);
+        buf.extend_from_slice(&sum.to_le_bytes());
+        buf
+    }
+
+    #[test]
+    fn rans_order1_and_nx16_blocks_decode() {
+        let data = b"ACGTTGCAACGGTTAACCGGTTAAACCCGGGTTT";
+        let o1 = frame_block(4, &rans::encode_o1(data), data.len());
+        let block = read_block(&mut Cursor::new(&o1)).unwrap();
+        assert_eq!(block.data, data);
+        for states32 in [false, true] {
+            let nx = frame_block(5, &rans_nx16::encode(data, true, states32), data.len());
+            let block = read_block(&mut Cursor::new(&nx)).unwrap();
+            assert_eq!(block.data, data);
+        }
+        let mut buf = Vec::new();
+        write_block(Method::RansNx16, content::CORE_DATA, 0, data, &mut buf).unwrap();
+        assert_eq!(read_block(&mut Cursor::new(&buf)).unwrap().data, data);
     }
 
     #[test]
