@@ -3,7 +3,7 @@
 //! The module is `tpt_bio`. Heavy work runs under `py.detach`, so the GIL is
 //! released while it executes. Sequence readers (FASTQ, indexed BAM) and
 //! vision routines (Otsu threshold, thresholding, 2D labelling, watershed) are
-//! exposed; NumPy arrays are used for image inputs and outputs.
+//! exposed; `NumPy` arrays are used for image inputs and outputs.
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter};
@@ -35,7 +35,7 @@ fn seq_err(e: SeqError) -> PyErr {
     }
 }
 
-fn image_err(e: ImageError) -> PyErr {
+fn image_err(e: &ImageError) -> PyErr {
     PyValueError::new_err(e.to_string())
 }
 
@@ -231,12 +231,11 @@ impl PyIndexedBam {
         let ref_id = self.reader.header().ref_id(parsed.contig()).ok_or_else(|| {
             PyValueError::new_err(format!("unknown reference: {}", parsed.contig()))
         })?;
-        let (beg, end) = match parsed.interval() {
-            Some(iv) => (iv.start(), iv.end()),
-            None => {
-                let len = self.reader.header().references()[ref_id as usize].len;
-                (0, len)
-            }
+        let (beg, end) = if let Some(iv) = parsed.interval() {
+            (iv.start(), iv.end())
+        } else {
+            let len = self.reader.header().references()[ref_id as usize].len;
+            (0, len)
         };
         let reader = &mut self.reader;
         let index = &self.index;
@@ -262,13 +261,17 @@ fn build_bai(py: Python<'_>, bam_path: &str, bai_path: &str) -> PyResult<()> {
 // Vision
 // ---------------------------------------------------------------------------
 
-/// Copies a 2D NumPy array into a tpt-bio image. Images own their samples, so
-/// this is one copy on input; NumPy arrays of any strides are accepted.
-fn image_from<T: Element + Copy>(a: &PyReadonlyArray2<'_, T>) -> PyResult<Image<T>> {
+/// Copies a 2D `NumPy` array into a tpt-bio image. Images own their samples, so
+/// this is one copy on input; `NumPy` arrays of any strides are accepted.
+///
+/// Takes the array by value because `PyO3` extracts `PyReadonlyArray2` arguments
+/// by value; the lint is allowed for that reason.
+#[allow(clippy::needless_pass_by_value)]
+fn image_from<T: Element + Copy>(a: PyReadonlyArray2<'_, T>) -> PyResult<Image<T>> {
     let view = a.as_array();
     let (h, w) = view.dim();
     let data: Vec<T> = view.iter().copied().collect();
-    Image::new_2d(w, h, data).map_err(image_err)
+    Image::new_2d(w, h, data).map_err(|e| image_err(&e))
 }
 
 /// Converts any supported 2D numeric array to an `f64` image.
@@ -276,7 +279,7 @@ fn image_f64(obj: &Bound<'_, PyAny>) -> PyResult<Image<f64>> {
     macro_rules! try_types {
         ($($t:ty),*) => {$(
             if let Ok(a) = obj.extract::<PyReadonlyArray2<'_, $t>>() {
-                return Ok(image_from(&a)?.map(|&v| f64::from(v)));
+                return Ok(image_from(a)?.map(|&v| f64::from(v)));
             }
         )*};
     }
@@ -286,7 +289,7 @@ fn image_f64(obj: &Bound<'_, PyAny>) -> PyResult<Image<f64>> {
     ))
 }
 
-fn label_array<'py>(py: Python<'py>, labels: Image<u32>) -> PyResult<Bound<'py, PyArray2<u32>>> {
+fn label_array(py: Python<'_>, labels: Image<u32>) -> PyResult<Bound<'_, PyArray2<u32>>> {
     let (w, h, _) = labels.shape();
     let arr = Array2::from_shape_vec((h, w), labels.into_data())
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -298,7 +301,7 @@ fn label_array<'py>(py: Python<'py>, labels: Image<u32>) -> PyResult<Bound<'py, 
 #[pyo3(signature = (image, bins=256))]
 fn otsu_threshold(py: Python<'_>, image: &Bound<'_, PyAny>, bins: usize) -> PyResult<Option<f64>> {
     let img = image_f64(image)?;
-    py.detach(|| threshold::otsu_threshold(&img, bins)).map_err(image_err)
+    py.detach(|| threshold::otsu_threshold(&img, bins)).map_err(|e| image_err(&e))
 }
 
 /// Foreground mask: `True` where `image > threshold_value`.
@@ -332,8 +335,8 @@ fn label_components<'py>(
         8 => Connectivity2::Eight,
         _ => return Err(PyValueError::new_err("connectivity must be 4 or 8")),
     };
-    let img = image_from(&mask)?;
-    let labeling = py.detach(|| label::label_2d(&img, conn)).map_err(image_err)?;
+    let img = image_from(mask)?;
+    let labeling = py.detach(|| label::label_2d(&img, conn)).map_err(|e| image_err(&e))?;
     let count = labeling.count;
     Ok((label_array(py, labeling.labels)?, count))
 }
@@ -351,17 +354,15 @@ fn watershed_2d<'py>(
     mask: Option<PyReadonlyArray2<'py, bool>>,
 ) -> PyResult<Bound<'py, PyArray2<u32>>> {
     let img = image_f64(image)?;
-    let mk = image_from(&markers)?;
-    let m = mask.as_ref().map(image_from).transpose()?;
-    let out = py.detach(|| watershed::watershed(&img, &mk, m.as_ref())).map_err(image_err)?;
+    let mk = image_from(markers)?;
+    let m = mask.map(image_from).transpose()?;
+    let out =
+        py.detach(|| watershed::watershed(&img, &mk, m.as_ref())).map_err(|e| image_err(&e))?;
     label_array(py, out)
 }
 
-/// Converts an image to a 2D NumPy array with the same element type.
-fn image_to_py<'py, T: Element>(
-    py: Python<'py>,
-    img: Image<T>,
-) -> PyResult<Bound<'py, PyArray2<T>>> {
+/// Converts an image to a 2D `NumPy` array with the same element type.
+fn image_to_py<T: Element>(py: Python<'_>, img: Image<T>) -> PyResult<Bound<'_, PyArray2<T>>> {
     let (w, h, _) = img.shape();
     let arr = Array2::from_shape_vec((h, w), img.into_data())
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -402,7 +403,7 @@ fn read_planes(path: &str) -> PyResult<Planes> {
     decoded.map_err(|e| PyValueError::new_err(format!("cannot decode '{path}': {e}")))
 }
 
-/// Loads one channel of a PNG or TIFF file as a 2D NumPy array, keeping its sample
+/// Loads one channel of a PNG or TIFF file as a 2D `NumPy` array, keeping its sample
 /// type (`uint8`, `uint16` or `float32`). Returns `(array, channel_count)`.
 #[pyfunction]
 #[pyo3(signature = (path, channel=0))]
@@ -432,9 +433,9 @@ fn object_features<'py>(
     labels: PyReadonlyArray2<'py, u32>,
     intensity: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let lab = image_from(&labels)?;
+    let lab = image_from(labels)?;
     let intensity_img = intensity.map(image_f64).transpose()?;
-    let shape = py.detach(|| shape_features_2d(&lab)).map_err(image_err)?;
+    let shape = py.detach(|| shape_features_2d(&lab)).map_err(|e| image_err(&e))?;
 
     let mut columns: Vec<(&str, Vec<f64>)> = vec![
         ("label", shape.iter().map(|s| f64::from(s.label)).collect()),
@@ -444,7 +445,7 @@ fn object_features<'py>(
         ("solidity", shape.iter().map(|s| s.solidity).collect()),
     ];
     if let Some(img) = &intensity_img {
-        let ints = py.detach(|| intensity_features(&lab, img)).map_err(image_err)?;
+        let ints = py.detach(|| intensity_features(&lab, img)).map_err(|e| image_err(&e))?;
         if ints.len() != shape.len() {
             return Err(PyValueError::new_err("shape and intensity measurements disagree"));
         }
@@ -476,7 +477,7 @@ pub struct PyPipeline {
 impl PyPipeline {
     /// Reads and validates a TOML pipeline definition file.
     ///
-    /// Raises OSError if the file cannot be read and ValueError if it is invalid.
+    /// Raises `OSError` if the file cannot be read and `ValueError` if it is invalid.
     #[staticmethod]
     fn from_toml(path: &str) -> PyResult<Self> {
         let text = std::fs::read_to_string(path)
@@ -488,11 +489,11 @@ impl PyPipeline {
 
     /// Runs every node and returns the outputs in definition order.
     ///
-    /// Tables are float64 arrays, labels are uint64 arrays, reads are FastqRecord
-    /// lists, BAM records are BamRecord lists, images and masks are 2D arrays, objects
+    /// Tables are float64 arrays, labels are uint64 arrays, reads are `FastqRecord`
+    /// lists, BAM records are `BamRecord` lists, images and masks are 2D arrays, objects
     /// are `(labels, count)` tuples, frames are dicts of lists, and files are paths.
     ///
-    /// Raises RuntimeError if a node fails.
+    /// Raises `RuntimeError` if a node fails.
     fn run<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
         let inner = &self.inner;
         let outputs =

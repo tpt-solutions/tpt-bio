@@ -6,11 +6,18 @@ release the GIL.
 
 ## Install
 
+The package is not on PyPI yet. Build a wheel from this repository with
+[maturin](https://www.maturin.rs/) and install it:
+
 ```sh
-pip install tpt-bio
+pip install maturin
+cd bindings/tpt-bio-py
+maturin build --release
+pip install target/wheels/tpt_bio-*.whl
 ```
 
-Requires Python 3.9 or later. Built as an abi3 wheel with PyO3.
+Requires Python 3.9 or later. Built as an abi3 wheel with PyO3. See
+[docs/tutorials/python.md](../../docs/tutorials/python.md) for a worked example.
 
 ## Example
 
