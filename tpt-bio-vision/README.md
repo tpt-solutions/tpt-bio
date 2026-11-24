@@ -59,6 +59,10 @@ cargo test -p tpt-bio-vision
 
 Rust 1.95, set in the workspace manifest.
 
+## Status
+
+Version 0.1.0, pre-release. The capabilities in the table above are listed as implemented in the crate documentation. Open items are tracked in `todo.md` in the repository root.
+
 ## Licence
 
 Dual-licensed under MIT OR Apache-2.0, at your option.
