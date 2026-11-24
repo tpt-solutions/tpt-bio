@@ -7,7 +7,7 @@
 //! * `pca` fits a [`Pca`] and projects the table onto its components.
 //! * `kmeans` clusters the rows with [`kmeans`] and returns one label per row.
 //!
-//! Values flow between nodes through the [`Dag`] executor, so a node receives its
+//! Values flow between nodes through the [`crate::Dag`] executor, so a node receives its
 //! predecessors' outputs in the order of its input slots.
 
 use std::fmt;
