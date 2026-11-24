@@ -82,3 +82,10 @@ path = "fuzz_targets/fasta_fai.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "cram_read"
+path = "fuzz_targets/cram_read.rs"
+test = false
+doc = false
+bench = false
