@@ -483,4 +483,24 @@ mod tests {
         assert!(matches!(slabs.read_slab(1, 0, 1), Err(RenderError::ChannelIndex(1))));
         assert!(slabs.read_slab(0, 0, 5).is_err());
     }
+
+    #[test]
+    fn render3d_stream_ome_tiff_multichannel_planes_in_order() {
+        use crate::io::ome::{OmeTiff, encode_ome_tiff};
+        // Two channels of three planes. The file stores them channel-major, so channel c,
+        // plane z is volume plane c * size_z + z.
+        let (w, h, sz, sc) = (4usize, 3usize, 3usize, 2usize);
+        let data: Vec<u16> = (0..w * h * sz * sc).map(|i| (i as u16) * 3 + 1).collect();
+        let img = Image::new_3d(w, h, sz * sc, data).unwrap();
+        let bytes = encode_ome_tiff(&img, (sz, sc, 1), None, false).unwrap();
+        let tiff = OmeTiff::open(bytes).unwrap();
+        let reference = Volume::from_u16(std::slice::from_ref(&img), [1.0; 3]).unwrap();
+        let mut slabs = OmeSlabs::<_, u16>::new(&tiff, 0, 0, [1.0; 3]).unwrap();
+        assert_eq!(slabs.channel_count(), sc);
+        for c in 0..sc {
+            let slab = slabs.read_slab(c, 0, sz).unwrap();
+            let want = &reference.channel(0).unwrap().data()[c * sz * w * h..(c + 1) * sz * w * h];
+            assert_eq!(slab.data(), want, "channel {c}");
+        }
+    }
 }
