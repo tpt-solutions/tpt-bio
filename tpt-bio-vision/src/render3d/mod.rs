@@ -51,6 +51,8 @@ pub enum RenderError {
     },
     /// A requested channel index does not exist.
     ChannelIndex(usize),
+    /// A slab could not be read from its source. The message says why.
+    Read(String),
 }
 
 impl fmt::Display for RenderError {
@@ -63,6 +65,7 @@ impl fmt::Display for RenderError {
                 write!(f, "transfer function has {actual} channels, volume has {expected}")
             }
             Self::ChannelIndex(i) => write!(f, "channel index {i} is out of range"),
+            Self::Read(m) => write!(f, "could not read slab: {m}"),
         }
     }
 }
