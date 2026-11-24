@@ -16,17 +16,12 @@ Note: the `license` field is the SPDX expression the crate declares. It has not 
 | Package | Version | Licence | Flag |
 |---|---|---|---|
 | borsh-derive | 1.8.1 | Apache-2.0 | APACHE-ONLY: on the requested allow list, but deny.toml rejects Apache-2.0-only crates |
-| ciborium | 0.2.2 | Apache-2.0 | APACHE-ONLY: on the requested allow list, but deny.toml rejects Apache-2.0-only crates |
-| ciborium-io | 0.2.2 | Apache-2.0 | APACHE-ONLY: on the requested allow list, but deny.toml rejects Apache-2.0-only crates |
-| ciborium-ll | 0.2.2 | Apache-2.0 | APACHE-ONLY: on the requested allow list, but deny.toml rejects Apache-2.0-only crates |
 
 ## All third-party packages
 
 | Package | Version | Licence | Source |
 |---|---|---|---|
 | adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | crates.io |
-| aho-corasick | 1.1.5 | Unlicense OR MIT | crates.io |
-| anes | 0.1.6 | MIT OR Apache-2.0 | crates.io |
 | anstream | 1.0.0 | MIT OR Apache-2.0 | crates.io |
 | anstyle | 1.0.14 | MIT OR Apache-2.0 | crates.io |
 | anstyle-parse | 1.0.0 | MIT OR Apache-2.0 | crates.io |
@@ -42,13 +37,9 @@ Note: the `license` field is the SPDX expression the crate declares. It has not 
 | bytemuck | 1.25.2 | Zlib OR Apache-2.0 OR MIT | crates.io |
 | byteorder-lite | 0.1.0 | Unlicense OR MIT | crates.io |
 | bytes | 1.12.2 | MIT | crates.io |
-| cast | 0.3.0 | MIT OR Apache-2.0 | crates.io |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 | crates.io |
 | cfg_aliases | 0.2.2 | MIT | crates.io |
 | chacha20 | 0.10.2 | MIT OR Apache-2.0 | crates.io |
-| ciborium | 0.2.2 | Apache-2.0 | crates.io |
-| ciborium-io | 0.2.2 | Apache-2.0 | crates.io |
-| ciborium-ll | 0.2.2 | Apache-2.0 | crates.io |
 | clap | 4.6.9 | MIT OR Apache-2.0 | crates.io |
 | clap_builder | 4.6.7 | MIT OR Apache-2.0 | crates.io |
 | clap_complete | 4.6.12 | MIT OR Apache-2.0 | crates.io |
@@ -59,8 +50,6 @@ Note: the `license` field is the SPDX expression the crate declares. It has not 
 | core_detect | 1.0.0 | MIT/Apache-2.0 | crates.io |
 | cpufeatures | 0.3.1 | MIT OR Apache-2.0 | crates.io |
 | crc32fast | 1.5.5 | MIT OR Apache-2.0 | crates.io |
-| criterion | 0.5.1 | Apache-2.0 OR MIT | crates.io |
-| criterion-plot | 0.5.0 | MIT/Apache-2.0 | crates.io |
 | crossbeam | 0.8.5 | MIT OR Apache-2.0 | crates.io |
 | crossbeam-channel | 0.5.17 | MIT OR Apache-2.0 | crates.io |
 | crossbeam-deque | 0.8.8 | MIT OR Apache-2.0 | crates.io |
@@ -83,12 +72,9 @@ Note: the `license` field is the SPDX expression the crate declares. It has not 
 | half | 2.7.1 | MIT OR Apache-2.0 | crates.io |
 | hashbrown | 0.17.2 | MIT OR Apache-2.0 | crates.io |
 | heck | 0.5.0 | MIT OR Apache-2.0 | crates.io |
-| hermit-abi | 0.5.3 | MIT OR Apache-2.0 | crates.io |
 | image | 0.25.10 | MIT OR Apache-2.0 | crates.io |
 | indexmap | 2.14.2 | Apache-2.0 OR MIT | crates.io |
-| is-terminal | 0.4.17 | MIT | crates.io |
 | is_terminal_polyfill | 1.70.2 | MIT OR Apache-2.0 | crates.io |
-| itertools | 0.10.5 | MIT/Apache-2.0 | crates.io |
 | itoa | 1.0.19 | MIT OR Apache-2.0 | crates.io |
 | jpeg-decoder | 0.3.2 | MIT OR Apache-2.0 | crates.io |
 | js-sys | 0.3.107 | MIT OR Apache-2.0 | crates.io |
@@ -108,7 +94,6 @@ Note: the `license` field is the SPDX expression the crate declares. It has not 
 | numpy | 0.30.0 | BSD-2-Clause | crates.io |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 | crates.io |
 | once_cell_polyfill | 1.70.2 | MIT OR Apache-2.0 | crates.io |
-| oorandom | 11.1.5 | MIT | crates.io |
 | pin-project-lite | 0.2.18 | Apache-2.0 OR MIT | crates.io |
 | plotters | 0.3.7 | MIT | crates.io |
 | plotters-backend | 0.3.7 | MIT | crates.io |
@@ -137,15 +122,12 @@ Note: the `license` field is the SPDX expression the crate declares. It has not 
 | rawpointer | 0.2.1 | MIT/Apache-2.0 | crates.io |
 | rayon | 1.12.0 | MIT OR Apache-2.0 | crates.io |
 | rayon-core | 1.13.0 | MIT OR Apache-2.0 | crates.io |
-| regex | 1.13.2 | MIT OR Apache-2.0 | crates.io |
-| regex-automata | 0.4.19 | MIT OR Apache-2.0 | crates.io |
 | regex-syntax | 0.8.12 | MIT OR Apache-2.0 | crates.io |
 | roff | 1.1.1 | MIT OR Apache-2.0 | crates.io |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT | crates.io |
 | rustix | 1.1.6 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | crates.io |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 | crates.io |
 | rusty-fork | 0.3.1 | MIT/Apache-2.0 | crates.io |
-| same-file | 1.0.6 | Unlicense/MIT | crates.io |
 | serde | 1.0.229 | MIT OR Apache-2.0 | crates.io |
 | serde_core | 1.0.229 | MIT OR Apache-2.0 | crates.io |
 | serde_derive | 1.0.229 | MIT OR Apache-2.0 | crates.io |
@@ -160,7 +142,6 @@ Note: the `license` field is the SPDX expression the crate declares. It has not 
 | tempfile | 3.27.0 | MIT OR Apache-2.0 | crates.io |
 | tiff | 0.11.3 | MIT | crates.io |
 | tiff | 0.9.1 | MIT | crates.io |
-| tinytemplate | 1.2.1 | Apache-2.0 OR MIT | crates.io |
 | toml | 0.8.23 | MIT OR Apache-2.0 | crates.io |
 | toml_datetime | 0.6.11 | MIT OR Apache-2.0 | crates.io |
 | toml_datetime | 1.1.3+spec-1.1.0 | MIT OR Apache-2.0 | crates.io |
@@ -168,6 +149,8 @@ Note: the `license` field is the SPDX expression the crate declares. It has not 
 | toml_edit | 0.25.20+spec-1.1.0 | MIT OR Apache-2.0 | crates.io |
 | toml_parser | 1.1.6+spec-1.1.0 | MIT OR Apache-2.0 | crates.io |
 | toml_write | 0.1.2 | MIT OR Apache-2.0 | crates.io |
+| tpt-benchmark | 0.1.0 | MIT OR Apache-2.0 | git |
+| tpt-benchmark-macros | 0.1.0 | MIT OR Apache-2.0 | git |
 | tpt-crypto-core | 0.1.0 | MIT OR Apache-2.0 | git |
 | tpt-crypto-ct | 0.1.0 | MIT OR Apache-2.0 | git |
 | tpt-crypto-hash | 0.1.0 | MIT OR Apache-2.0 | git |
@@ -220,14 +203,12 @@ Note: the `license` field is the SPDX expression the crate declares. It has not 
 | unicode-ident | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 | crates.io |
 | utf8parse | 0.2.2 | Apache-2.0 OR MIT | crates.io |
 | wait-timeout | 0.2.1 | MIT/Apache-2.0 | crates.io |
-| walkdir | 2.5.1 | Unlicense/MIT | crates.io |
 | wasm-bindgen | 0.2.130 | MIT OR Apache-2.0 | crates.io |
 | wasm-bindgen-macro | 0.2.130 | MIT OR Apache-2.0 | crates.io |
 | wasm-bindgen-macro-support | 0.2.130 | MIT OR Apache-2.0 | crates.io |
 | wasm-bindgen-shared | 0.2.130 | MIT OR Apache-2.0 | crates.io |
 | web-sys | 0.3.107 | MIT OR Apache-2.0 | crates.io |
 | weezl | 0.1.12 | MIT OR Apache-2.0 | crates.io |
-| winapi-util | 0.1.11 | Unlicense OR MIT | crates.io |
 | windows-link | 0.2.1 | MIT OR Apache-2.0 | crates.io |
 | windows-sys | 0.61.2 | MIT OR Apache-2.0 | crates.io |
 | winnow | 0.7.15 | MIT | crates.io |

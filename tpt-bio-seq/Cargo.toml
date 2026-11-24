@@ -28,7 +28,7 @@ workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
-criterion.workspace = true
+tpt-benchmark.workspace = true
 
 [[bench]]
 name = "parsers"

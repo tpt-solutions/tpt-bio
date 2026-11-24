@@ -2,40 +2,34 @@
 
 ## Baseline (self-measured, Windows x86_64)
 
-These numbers are a self-measured baseline on one Windows 11 x86_64 machine (16 GB RAM),
-rustc 1.95.0, release profile. They measure this crate's own throughput over time.
-They are **not** compared with samtools, bcftools or any other tool. Other machines,
-other OSes and other background load will give different numbers, so only compare runs
-made on the same machine.
+The benchmarks use [`tpt-benchmark`](https://github.com/tpt-solutions/tpt-benchmark),
+pinned in the workspace `Cargo.toml`. The earlier `criterion` figures were removed: their
+benchmark names and numbers are not comparable with `tpt-benchmark`, so the table below
+is the first `tpt-benchmark` baseline. It is a single `--quick` run. Re-measure with a full
+run before drawing conclusions. The ± value is the tool's relative error for that run.
 
-Command:
+| Benchmark | Time per iteration |
+| --- | --- |
+| `bgzf_decompress::parallel` | 2.83 ms ±4.6% |
+| `bgzf_decompress::streaming` | 10.42 ms ±2.0% |
+| `fastq_parse::records` | 1.46 ms ±1.6% |
+| `sam_parse::records` | 16.41 ms ±13.9% (noisy) |
+| `vcf_record_parse::records_2_samples` | 4.82 ms ±13.7% (noisy) |
+| `bam_record_view::views` | 7.57 ms ±1.8% |
 
-```
-cargo bench -p tpt-bio-seq --bench parsers -- --warm-up-time 1 --measurement-time 3
-```
-
-Criterion reports the low, median and high estimate of each measurement (95% confidence
-interval). The table gives the median.
-
-| Benchmark | Median time | Median throughput |
-| --- | --- | --- |
-| `bgzf_decompress/parallel` | 2.145 ms | 1.92 GiB/s |
-| `bgzf_decompress/streaming` | 9.217 ms | 458 MiB/s |
-| `fastq_parse/records` | 1.384 ms | 14.4 Melem/s |
-| `sam_parse/records` | 14.54 ms | 1.38 Melem/s |
-| `vcf_record_parse/records` (2 samples) | 6.953 ms | 2.88 Melem/s |
-| `bam_record_view/views` | 7.114 ms | 2.81 Melem/s |
-
-The short measurement time (3 s) keeps the run quick. Expect wider intervals than a
-default `cargo bench` run. The `bgzf_decompress/parallel` and `streaming` rows use the
-same input, so their ratio shows the parallel speed-up on this machine.
+That run was on one Windows 11 x86_64 machine (16 GB RAM), release profile, `--quick`.
+`--quick` is short and imprecise. Other machines, OSes and background load give different
+numbers, so only compare runs made on the same machine.
 
 ## Rerunning
 
-- Run `cargo bench -p tpt-bio-seq --bench parsers` for the default criterion settings
-  (longer, more precise).
-- Criterion writes raw results to `target/criterion/`. Compare runs by reading the
-  `change:` lines that criterion prints against the previous run in that directory.
+- Run `cargo bench -p tpt-bio-seq --bench parsers` for the default settings (longer,
+  more precise). Use `-- --quick` for a shorter run.
+- Results are written to `target/tpt-benchmark/`: `tpt-benchmark.json` for the run,
+  `index.html` for the report. Save a named baseline with
+  `-- --save-baseline <name>` and compare with `-- --baseline <name>`. A significant
+  regression above the threshold (default 5%) exits with code 1.
+- Run `cargo bench -p tpt-bio-seq --bench parsers -- --list` to list the benchmark names.
 - Close other heavy programs first. Do not run benchmarks while `cargo fuzz` or a build
   is running, since they share the CPU.
 - The benchmark source is `tpt-bio-seq/benches/parsers.rs`. Its inputs are generated in

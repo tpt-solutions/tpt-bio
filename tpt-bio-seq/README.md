@@ -57,7 +57,7 @@ cargo bench -p tpt-bio-seq --bench parsers
 - `tests/malformed.rs` checks that truncated and corrupt inputs return errors
   rather than panicking.
 - `tests/random_inputs.rs` feeds generated inputs to the parsers.
-- `benches/parsers.rs` measures parser throughput with `criterion`.
+- `benches/parsers.rs` measures parser throughput with `tpt-benchmark`.
 - The fuzz targets in the top-level `fuzz/` directory cover BGZF, FASTQ, SAM,
   BAM, BAI, VCF, BCF, tabix and FASTA index parsing.
 

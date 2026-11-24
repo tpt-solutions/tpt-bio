@@ -30,7 +30,7 @@ Local testing is Windows x86_64 only. Nothing else has been run by hand.
 
 Other workflows:
 
-- `.github/workflows/perf.yml`: criterion benches on ubuntu-latest, weekly and on manual
+- `.github/workflows/perf.yml`: tpt-benchmark benches on ubuntu-latest, weekly and on manual
   dispatch. Informational only; it does not fail on regressions.
 - `.github/workflows/wheels.yml`: Python wheels for linux, macOS and Windows, manual
   dispatch only, uploaded as workflow artifacts. Nothing is published.

@@ -60,7 +60,7 @@ clap_complete = "4.5"
 clap_mangen = "0.2"
 proptest = "1"
 serde_json = "1"
-criterion = "0.5"
+tpt-benchmark = { version = "0.1.0", git = "https://github.com/tpt-solutions/tpt-benchmark", rev = "8384f448b1af8266377753b9887a73421975f112" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

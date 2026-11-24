@@ -4,13 +4,10 @@
 //! tools: samtools and bcftools are not part of this benchmark run.
 
 use std::fmt::Write as _;
-use std::hint::black_box;
-use std::io::Write;
 
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use tpt_bio_seq::bgzf::{BgzfReader, BgzfWriter};
+use tpt_benchmark::tpt_bench_group;
+use tpt_bio_seq::BamWriter;
 use tpt_bio_seq::sam::SamReader;
-use tpt_bio_seq::{BamReader, BamWriter, FastqParser, VcfRecord};
 
 const READS: u64 = 20_000;
 const READ_LEN: usize = 100;
@@ -75,41 +72,67 @@ fn bam_bytes(sam: &str) -> Vec<u8> {
     out
 }
 
-fn bench_bgzf_decompress(c: &mut Criterion) {
-    let payload = fastq_text(READS);
-    let mut w = BgzfWriter::new(Vec::new());
-    w.write_all(&payload).expect("in-memory write");
-    let compressed = w.finish().expect("in-memory finish");
+#[tpt_bench_group]
+mod bgzf_decompress {
+    use std::io::Write;
 
-    let mut group = c.benchmark_group("bgzf_decompress");
-    group.throughput(Throughput::Bytes(payload.len() as u64));
-    group.bench_function("parallel", |b| {
+    use tpt_benchmark::{Bencher, Throughput, black_box, tpt_bench};
+    use tpt_bio_seq::bgzf::{BgzfReader, BgzfWriter};
+
+    use super::{READS, fastq_text};
+
+    fn compressed_payload() -> (u64, Vec<u8>) {
+        let payload = fastq_text(READS);
+        let mut w = BgzfWriter::new(Vec::new());
+        w.write_all(&payload).expect("in-memory write");
+        let compressed = w.finish().expect("in-memory finish");
+        (payload.len() as u64, compressed)
+    }
+
+    #[tpt_bench]
+    fn parallel(b: &mut Bencher) {
+        let (len, compressed) = compressed_payload();
+        b.throughput(Throughput::Bytes(len));
         b.iter(|| black_box(tpt_bio_seq::bgzf::decompress_parallel(black_box(&compressed))));
-    });
-    group.bench_function("streaming", |b| {
+    }
+
+    #[tpt_bench]
+    fn streaming(b: &mut Bencher) {
+        let (len, compressed) = compressed_payload();
+        b.throughput(Throughput::Bytes(len));
         b.iter(|| black_box(BgzfReader::new(black_box(&compressed[..])).read_to_vec()));
-    });
-    group.finish();
+    }
 }
 
-fn bench_fastq_parse(c: &mut Criterion) {
-    let data = fastq_text(READS);
-    let mut group = c.benchmark_group("fastq_parse");
-    group.throughput(Throughput::Elements(READS));
-    group.bench_function("records", |b| {
+#[tpt_bench_group]
+mod fastq_parse {
+    use tpt_benchmark::{Bencher, Throughput, black_box, tpt_bench};
+    use tpt_bio_seq::FastqParser;
+
+    use super::{READS, fastq_text};
+
+    #[tpt_bench]
+    fn records(b: &mut Bencher) {
+        let data = fastq_text(READS);
+        b.throughput(Throughput::Elements(READS));
         b.iter(|| {
             let n = FastqParser::new(black_box(&data)).flatten().count();
             black_box(n)
         });
-    });
-    group.finish();
+    }
 }
 
-fn bench_sam_parse(c: &mut Criterion) {
-    let text = sam_text(READS);
-    let mut group = c.benchmark_group("sam_parse");
-    group.throughput(Throughput::Elements(READS));
-    group.bench_function("records", |b| {
+#[tpt_bench_group]
+mod sam_parse {
+    use tpt_benchmark::{Bencher, Throughput, black_box, tpt_bench};
+    use tpt_bio_seq::sam::SamReader;
+
+    use super::{READS, sam_text};
+
+    #[tpt_bench]
+    fn records(b: &mut Bencher) {
+        let text = sam_text(READS);
+        b.throughput(Throughput::Elements(READS));
         b.iter(|| {
             let mut reader = SamReader::new(black_box(text.as_bytes())).expect("SAM header");
             let mut n = 0u64;
@@ -119,15 +142,20 @@ fn bench_sam_parse(c: &mut Criterion) {
             }
             n
         });
-    });
-    group.finish();
+    }
 }
 
-fn bench_vcf_record_parse(c: &mut Criterion) {
-    let lines = vcf_lines(READS);
-    let mut group = c.benchmark_group("vcf_record_parse");
-    group.throughput(Throughput::Elements(READS));
-    group.bench_function(BenchmarkId::new("records", "2 samples"), |b| {
+#[tpt_bench_group]
+mod vcf_record_parse {
+    use tpt_benchmark::{Bencher, Throughput, black_box, tpt_bench};
+    use tpt_bio_seq::VcfRecord;
+
+    use super::{READS, vcf_lines};
+
+    #[tpt_bench]
+    fn records_2_samples(b: &mut Bencher) {
+        let lines = vcf_lines(READS);
+        b.throughput(Throughput::Elements(READS));
         b.iter(|| {
             let mut n = 0u64;
             for (i, line) in lines.iter().enumerate() {
@@ -137,15 +165,20 @@ fn bench_vcf_record_parse(c: &mut Criterion) {
             }
             n
         });
-    });
-    group.finish();
+    }
 }
 
-fn bench_bam_record_view(c: &mut Criterion) {
-    let bam = bam_bytes(&sam_text(READS));
-    let mut group = c.benchmark_group("bam_record_view");
-    group.throughput(Throughput::Elements(READS));
-    group.bench_function("views", |b| {
+#[tpt_bench_group]
+mod bam_record_view {
+    use tpt_benchmark::{Bencher, Throughput, black_box, tpt_bench};
+    use tpt_bio_seq::BamReader;
+
+    use super::{READS, bam_bytes, sam_text};
+
+    #[tpt_bench]
+    fn views(b: &mut Bencher) {
+        let bam = bam_bytes(&sam_text(READS));
+        b.throughput(Throughput::Elements(READS));
         b.iter(|| {
             let mut reader = BamReader::new(black_box(&bam[..])).expect("BAM header");
             let mut n = 0u64;
@@ -155,16 +188,7 @@ fn bench_bam_record_view(c: &mut Criterion) {
             }
             n
         });
-    });
-    group.finish();
+    }
 }
 
-criterion_group!(
-    benches,
-    bench_bgzf_decompress,
-    bench_fastq_parse,
-    bench_sam_parse,
-    bench_vcf_record_parse,
-    bench_bam_record_view
-);
-criterion_main!(benches);
+tpt_benchmark::main!(bgzf_decompress, fastq_parse, sam_parse, vcf_record_parse, bam_record_view);

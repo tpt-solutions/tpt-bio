@@ -1,5 +1,5 @@
-# Informational performance run. Benchmarks the tpt-bio-seq parsers with criterion
-# and keeps the raw criterion output as a workflow artifact.
+# Informational performance run. Benchmarks the tpt-bio-seq parsers with tpt-benchmark
+# and keeps the raw output (target/tpt-benchmark/) as a workflow artifact.
 #
 # This workflow never fails on a regression: the bench step is `continue-on-error`,
 # and nothing compares against a stored baseline. Read the artifact by hand.
@@ -24,26 +24,26 @@ env:
 
 jobs:
   bench:
-    name: criterion parsers (ubuntu)
+    name: tpt-benchmark parsers (ubuntu)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.95.0
       - uses: Swatinem/rust-cache@v2
-      - name: Run criterion benches (informational, does not gate)
+      - name: Run tpt-benchmark benches (informational, does not gate)
         id: bench
         continue-on-error: true
-        run: cargo bench -p tpt-bio-seq --bench parsers -- --warm-up-time 1 --measurement-time 3
+        run: cargo bench -p tpt-bio-seq --bench parsers -- --quick --noplot
       - name: Report bench outcome
         if: always()
         run: |
           echo "Bench step outcome: ${{ steps.bench.outcome }}"
           echo "This job is informational. A failed or slow run does not block anything."
-      - name: Upload criterion output
+      - name: Upload tpt-benchmark output
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: criterion-parsers-${{ github.run_number }}
-          path: target/criterion/
+          name: tpt-benchmark-parsers-${{ github.run_number }}
+          path: target/tpt-benchmark/
           if-no-files-found: warn
           retention-days: 90
