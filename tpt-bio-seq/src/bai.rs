@@ -397,10 +397,8 @@ pub fn fetch<R: Read + Seek>(
                 continue;
             }
             let rstart = view.pos().max(0) as u64;
-            let rend = view.cigar().map_or(rstart + 1, |c| {
-                let span = crate::record::reference_length(&c);
-                rstart + span.max(1)
-            });
+            // A record with no CIGAR, or a malformed one, is treated as one base long.
+            let rend = rstart + view.reference_span().unwrap_or(0).max(1);
             if rstart < end && rend > beg {
                 out.push(view.to_record()?);
             }

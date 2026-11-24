@@ -146,6 +146,25 @@ impl<'a> RecordView<'a> {
         Ok(ops)
     }
 
+    /// Reference bases spanned by the CIGAR, summed straight from the packed
+    /// operations. Unlike [`RecordView::cigar`], this does not allocate, which
+    /// matters when a region query tests many records it will not return.
+    ///
+    /// # Errors
+    /// Returns [`SeqError::Malformed`] for an unknown operation code.
+    pub fn reference_span(&self) -> Result<u64> {
+        let mut span = 0u64;
+        for i in 0..self.n_cigar {
+            let v = le_u32_unchecked(self.data, self.cigar_start() + 4 * i);
+            let kind = CigarKind::from_code((v & 0xf) as u8)
+                .ok_or_else(|| bad("unknown CIGAR operation code"))?;
+            if kind.consumes_reference() {
+                span += u64::from(v >> 4);
+            }
+        }
+        Ok(span)
+    }
+
     fn seq_start(&self) -> usize {
         self.cigar_start() + 4 * self.n_cigar
     }

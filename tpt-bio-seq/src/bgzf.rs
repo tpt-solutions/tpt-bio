@@ -157,6 +157,9 @@ pub struct BgzfReader<R> {
     raw_start: u64,
     /// Blocks inflated ahead of the reader, in file order.
     ready: VecDeque<ReadyBlock>,
+    /// Compressed bytes to read on the next refill. Starts small after a seek, so a
+    /// short region query does not inflate a large batch, and doubles up to the limit.
+    ahead: usize,
 }
 
 /// A block that has been inflated ahead of use.
@@ -170,8 +173,10 @@ struct ReadyBlock {
     data: Vec<u8>,
 }
 
-/// Compressed bytes read ahead per batch. Blocks in a batch inflate in parallel.
+/// Compressed bytes read ahead per batch, at most. Blocks in a batch inflate in parallel.
 const READ_AHEAD_BYTES: usize = 4 << 20;
+/// Compressed bytes read ahead first, after the reader starts or seeks.
+const READ_AHEAD_MIN: usize = 1 << 16;
 
 impl<R: Read> BgzfReader<R> {
     /// Wraps a reader positioned at the start of a BGZF stream.
@@ -186,6 +191,7 @@ impl<R: Read> BgzfReader<R> {
             raw: Vec::new(),
             raw_start: 0,
             ready: VecDeque::new(),
+            ahead: READ_AHEAD_MIN,
         }
     }
 
@@ -193,7 +199,9 @@ impl<R: Read> BgzfReader<R> {
     /// Returns `false` when the input has ended and nothing is left.
     fn refill(&mut self) -> Result<bool> {
         let mut eof = false;
-        while self.raw.len() < READ_AHEAD_BYTES && !eof {
+        let target = self.ahead;
+        self.ahead = (self.ahead * 2).min(READ_AHEAD_BYTES);
+        while self.raw.len() < target && !eof {
             let old = self.raw.len();
             self.raw.resize(old + (1 << 16), 0);
             let n = self.inner.read(&mut self.raw[old..])?;
@@ -279,6 +287,7 @@ impl<R: Read + Seek> BgzfReader<R> {
         self.raw.clear();
         self.raw_start = coffset;
         self.ready.clear();
+        self.ahead = READ_AHEAD_MIN;
         if voffset.uncompressed_offset() == 0 {
             return Ok(());
         }
