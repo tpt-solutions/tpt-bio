@@ -114,6 +114,13 @@ fn check_fixed_header(h: &[u8]) -> Result<usize> {
 }
 
 fn inflate_block(cdata: &[u8], crc: u32, isize: u32) -> Result<Vec<u8>> {
+    // The footer is untrusted. Reject an impossible size before reserving memory for it.
+    if isize as usize > MAX_BLOCK_SIZE {
+        return Err(SeqError::malformed(
+            "BGZF",
+            format!("ISIZE {isize} exceeds the 64 KiB block limit"),
+        ));
+    }
     let mut out = Vec::with_capacity(isize as usize);
     DeflateDecoder::new(cdata)
         .read_to_end(&mut out)
