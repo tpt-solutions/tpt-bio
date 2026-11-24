@@ -1,10 +1,12 @@
 //! Decodes a CRAM file with `tpt-bio-seq` and prints it as SAM on stdout.
 //!
 //! Used to compare against `samtools view` output when checking CRAM conformance.
-//! The reference FASTA is needed for reference-based files.
+//! The reference FASTA is needed for reference-based files. Pass `-` in its place to
+//! open the file without a reference.
 //!
 //! ```text
 //! cargo run -p tpt-bio-seq --example cram_oracle_dump -- in.cram ref.fa > ours.sam
+//! cargo run -p tpt-bio-seq --example cram_oracle_dump -- in.cram - > ours.sam
 //! ```
 
 use std::fs::File;
@@ -29,9 +31,12 @@ fn main() -> ExitCode {
 }
 
 fn run(cram_path: &str, ref_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let reference = CramReference::from_path(ref_path)?;
     let file = BufReader::new(File::open(cram_path)?);
-    let mut reader = CramReader::with_reference(file, reference)?;
+    let mut reader = if ref_path == "-" {
+        CramReader::new(file)?
+    } else {
+        CramReader::with_reference(file, CramReference::from_path(ref_path)?)?
+    };
     let header = reader.header().clone();
     let mut out = SamWriter::new(BufWriter::new(std::io::stdout().lock()), header)?;
     while let Some(record) = reader.next_record()? {
