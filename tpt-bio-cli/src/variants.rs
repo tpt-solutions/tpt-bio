@@ -131,6 +131,10 @@ pub(crate) fn view(kind: Kind, args: &ViewArgs, format: Option<OutputFormat>) ->
         .into());
     }
     let region = args.region.as_deref().map(parse_region).transpose()?;
+    if region.is_none() && format.is_none() && !args.header_only {
+        // Whole-file text output streams each record, so memory does not grow with the file.
+        return stream_whole_file(kind, args);
+    }
     let (header_text, lines) = read_variants(kind, args, region.as_ref())?;
 
     let mut out = open_output(args.output.as_deref())?;
@@ -220,6 +224,38 @@ fn read_variants(
         }
         Kind::Sam | Kind::Bam => unreachable!("SAM and BAM are handled by the seq view path"),
     }
+}
+
+/// Writes a whole VCF or BCF file as VCF text, one record at a time.
+fn stream_whole_file(kind: Kind, args: &ViewArgs) -> CliResult {
+    let path = args.input.as_path();
+    let mut out = open_output(args.output.as_deref())?;
+    match kind {
+        Kind::Vcf => {
+            let mut reader = VcfReader::new(BufReader::with_capacity(1 << 16, File::open(path)?))?;
+            out.write_all(reader.header().text().as_bytes())?;
+            while let Some(rec) = reader.next_record()? {
+                writeln!(out, "{}", rec.line())?;
+            }
+        }
+        Kind::VcfGz => {
+            let mut reader = VcfReader::new_bgzf(File::open(path)?)?;
+            out.write_all(reader.header().text().as_bytes())?;
+            while let Some(rec) = reader.next_record()? {
+                writeln!(out, "{}", rec.line())?;
+            }
+        }
+        Kind::Bcf => {
+            let mut reader = BcfReader::new_bgzf(File::open(path)?)?;
+            out.write_all(reader.header().vcf().text().as_bytes())?;
+            while let Some(rec) = reader.next_record()? {
+                writeln!(out, "{}", rec.line())?;
+            }
+        }
+        Kind::Sam | Kind::Bam => unreachable!("SAM and BAM are handled by the seq view path"),
+    }
+    out.flush()?;
+    Ok(())
 }
 
 fn collect_vcf<R: BufRead>(reader: &mut VcfReader<R>) -> CliResult<Vec<String>> {

@@ -12,7 +12,7 @@
 //! [`TabixIndex`] built by [`build_bcf_index`].
 
 use std::collections::HashMap;
-use std::fmt::{Display, Write as _};
+use std::fmt::Write as _;
 use std::io::{Read, Seek, Write};
 
 use crate::bgzf::{BgzfReader, BgzfWriter, read_bounded};
@@ -343,114 +343,143 @@ impl<'a> Fields<'a> {
         Ok((ty, usize::from(count)))
     }
 
-    /// Integer values. Stops at the end-of-vector sentinel; `None` marks a missing value.
-    fn ints(&mut self, ty: u8, count: usize) -> Result<Vec<Option<i64>>> {
+    /// The raw bytes of a typed integer vector. Empty when `count` is 0.
+    fn int_vector(&mut self, ty: u8, count: usize) -> Result<&'a [u8]> {
         if count == 0 {
-            return Ok(Vec::new());
+            return Ok(&[]);
         }
         let size = int_size(ty)?;
-        let raw = self.take_elems(count, size)?;
-        let (missing, eov) = int_sentinels(ty);
-        let mut out = Vec::with_capacity(count);
-        for chunk in raw.chunks_exact(size) {
-            let v = int_read(chunk, ty);
-            if v == eov {
-                break;
-            }
-            out.push((v != missing).then_some(v));
-        }
-        Ok(out)
+        self.take_elems(count, size)
     }
 
-    fn floats(&mut self, count: usize) -> Result<Vec<Option<f32>>> {
-        let raw = self.take_elems(count, 4)?;
-        let mut out = Vec::with_capacity(count);
-        for chunk in raw.chunks_exact(4) {
-            let bits = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-            if bits == FLOAT_EOV {
-                break;
-            }
-            out.push(if bits == FLOAT_MISSING { None } else { Some(f32::from_bits(bits)) });
-        }
-        Ok(out)
-    }
-
-    /// Characters, with trailing NUL padding removed.
-    fn chars(&mut self, count: usize) -> Result<String> {
+    /// Appends characters, with trailing NUL padding removed.
+    fn chars_into(&mut self, count: usize, out: &mut String) -> Result<()> {
         let raw = self.take(count)?;
         let end = raw.iter().rposition(|&b| b != 0).map_or(0, |p| p + 1);
-        String::from_utf8(raw[..end].to_vec())
-            .map_err(|_| SeqError::malformed(FORMAT, "string value is not UTF-8"))
+        let text = std::str::from_utf8(&raw[..end])
+            .map_err(|_| SeqError::malformed(FORMAT, "string value is not UTF-8"))?;
+        out.push_str(text);
+        Ok(())
     }
 
-    /// A typed string such as ID, REF or ALT. An empty string is a missing value.
-    fn typed_string(&mut self) -> Result<String> {
+    /// Appends a typed string such as ID, REF or ALT. An empty string is a missing value.
+    fn typed_string_into(&mut self, out: &mut String) -> Result<()> {
         match self.descriptor()? {
-            (TYPE_CHAR, count) => self.chars(count),
-            (TYPE_MISSING, 0) => Ok(String::new()),
+            (TYPE_CHAR, count) => self.chars_into(count, out),
+            (TYPE_MISSING, 0) => Ok(()),
             _ => Err(SeqError::malformed(FORMAT, "expected a typed string")),
         }
     }
 }
 
-/// Renders a genotype's allele values, such as `0|1` or `./.`.
-fn genotype_text(vals: &[Option<i64>]) -> String {
-    let mut s = String::new();
-    for (i, v) in vals.iter().enumerate() {
-        if i > 0 {
-            s.push(if v.is_some_and(|x| x & 1 == 1) { '|' } else { '/' });
-        }
-        match v {
-            Some(x) if (x >> 1) > 0 => {
-                let _ = write!(s, "{}", (x >> 1) - 1);
-            }
-            _ => s.push('.'),
-        }
-    }
-    if s.is_empty() {
-        s.push('.');
-    }
-    s
+/// The values of an integer vector up to its end-of-vector sentinel. `None` is missing.
+fn int_values(raw: &[u8], ty: u8) -> impl Iterator<Item = Option<i64>> + '_ {
+    let (missing, eov) = int_sentinels(ty);
+    let size = int_size(ty).unwrap_or(4);
+    raw.chunks_exact(size)
+        .map(move |chunk| int_read(chunk, ty))
+        .take_while(move |&v| v != eov)
+        .map(move |v| (v != missing).then_some(v))
 }
 
-/// Joins values with commas, rendering missing values as `.`.
-fn join<T: Display>(vals: &[Option<T>]) -> String {
-    let mut s = String::new();
-    for (i, v) in vals.iter().enumerate() {
-        if i > 0 {
-            s.push(',');
-        }
-        match v {
-            Some(x) => {
-                let _ = write!(s, "{x}");
+/// Appends integers as VCF text: comma-separated, with `.` for missing values. With
+/// `is_gt`, the values are genotype alleles such as `0|1`, and an empty list renders `.`.
+fn write_ints<I: Iterator<Item = Option<i64>>>(out: &mut String, vals: I, is_gt: bool) {
+    let mut n = 0;
+    for v in vals {
+        if is_gt {
+            if n > 0 {
+                out.push(if v.is_some_and(|x| x & 1 == 1) { '|' } else { '/' });
             }
-            None => s.push('.'),
+            match v {
+                Some(x) if (x >> 1) > 0 => {
+                    let _ = write!(out, "{}", (x >> 1) - 1);
+                }
+                _ => out.push('.'),
+            }
+        } else {
+            if n > 0 {
+                out.push(',');
+            }
+            match v {
+                Some(x) => {
+                    let _ = write!(out, "{x}");
+                }
+                None => out.push('.'),
+            }
         }
+        n += 1;
     }
-    s
+    if is_gt && n == 0 {
+        out.push('.');
+    }
 }
 
-/// Reads one INFO or FORMAT value of `count` elements as VCF text. `is_gt` selects the
-/// genotype rendering for integer data. Returns an empty string when there is no value.
-fn read_cell(c: &mut Fields<'_>, ty: u8, count: usize, is_gt: bool) -> Result<String> {
+/// Appends floats as comma-separated VCF text, with `.` for missing values.
+fn write_floats(out: &mut String, raw: &[u8]) {
+    for (i, chunk) in raw.chunks_exact(4).enumerate() {
+        let bits = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        if bits == FLOAT_EOV {
+            break;
+        }
+        if i > 0 {
+            out.push(',');
+        }
+        if bits == FLOAT_MISSING {
+            out.push('.');
+        } else {
+            let _ = write!(out, "{}", f32::from_bits(bits));
+        }
+    }
+}
+
+/// Appends one INFO or FORMAT value of `count` elements as VCF text. `is_gt` selects the
+/// genotype rendering for integer data. Nothing is written for an empty value.
+fn write_cell(
+    c: &mut Fields<'_>,
+    ty: u8,
+    count: usize,
+    is_gt: bool,
+    out: &mut String,
+) -> Result<()> {
     match ty {
-        TYPE_CHAR => c.chars(count),
-        TYPE_MISSING if count == 0 => Ok(String::new()),
+        TYPE_CHAR => c.chars_into(count, out),
+        TYPE_MISSING if count == 0 => Ok(()),
         TYPE_MISSING => Err(SeqError::malformed(FORMAT, "missing type with a nonzero count")),
-        TYPE_FLOAT => Ok(join(&c.floats(count)?)),
+        TYPE_FLOAT => {
+            let raw = c.take_elems(count, 4)?;
+            write_floats(out, raw);
+            Ok(())
+        }
         _ => {
-            let vals = c.ints(ty, count)?;
-            Ok(if is_gt { genotype_text(&vals) } else { join(&vals) })
+            let raw = c.int_vector(ty, count)?;
+            write_ints(out, int_values(raw, ty), is_gt);
+            Ok(())
         }
     }
 }
 
-fn or_dot(s: String) -> String {
-    if s.is_empty() { ".".to_string() } else { s }
+/// Reusable buffers for [`decode_record`], so decoding does not allocate per cell.
+#[derive(Debug, Default)]
+struct DecodeScratch {
+    /// FORMAT cell text, written field by field.
+    cells: String,
+    /// Byte range in `cells` for each (field, sample) pair, field-major.
+    spans: Vec<(usize, usize)>,
+    /// FORMAT dictionary ids, in field order.
+    keys: Vec<i64>,
 }
 
-/// Decodes the shared and individual sections of one record into a VCF line.
-fn decode_record(header: &BcfHeader, shared: &[u8], indiv: &[u8]) -> Result<String> {
+/// Decodes the shared and individual sections of one record into a VCF line, written to
+/// `out` (cleared first). The line has no trailing newline.
+fn decode_record(
+    header: &BcfHeader,
+    shared: &[u8],
+    indiv: &[u8],
+    out: &mut String,
+    scratch: &mut DecodeScratch,
+) -> Result<()> {
+    out.clear();
     let mut c = Fields::new(shared);
     let chrom_id = usize::try_from(c.i32()?)
         .map_err(|_| SeqError::malformed(FORMAT, "record has a negative CHROM index"))?;
@@ -480,61 +509,138 @@ fn decode_record(header: &BcfHeader, shared: &[u8], indiv: &[u8]) -> Result<Stri
         .checked_add(1)
         .ok_or_else(|| SeqError::malformed(FORMAT, "POS overflows"))?;
 
-    let id = c.typed_string()?;
-    let reference = c.typed_string()?;
-    let mut alts = Vec::with_capacity(n_allele - 1);
-    for _ in 1..n_allele {
-        alts.push(c.typed_string()?);
+    let _ = write!(out, "{chrom}\t{pos}\t");
+    let mark = out.len();
+    c.typed_string_into(out)?;
+    if out.len() == mark {
+        out.push('.');
     }
-    let (ty, count) = c.descriptor()?;
-    let mut filters = Vec::new();
-    for id in c.ints(ty, count)?.into_iter().flatten() {
-        filters.push(header.string_name(id)?);
+    out.push('\t');
+    c.typed_string_into(out)?;
+    out.push('\t');
+    let mark = out.len();
+    for i in 1..n_allele {
+        if i > 1 {
+            out.push(',');
+        }
+        c.typed_string_into(out)?;
     }
+    if out.len() == mark {
+        out.push('.');
+    }
+    out.push('\t');
+    if qual_bits == FLOAT_MISSING {
+        out.push('.');
+    } else {
+        let _ = write!(out, "{}", f32::from_bits(qual_bits));
+    }
+    out.push('\t');
 
-    let mut info_parts = Vec::with_capacity(n_info);
-    for _ in 0..n_info {
+    let (ty, count) = c.descriptor()?;
+    let filters = c.int_vector(ty, count)?;
+    let mut n = 0;
+    for id in int_values(filters, ty).flatten() {
+        if n > 0 {
+            out.push(';');
+        }
+        out.push_str(header.string_name(id)?);
+        n += 1;
+    }
+    if n == 0 {
+        out.push('.');
+    }
+    out.push('\t');
+
+    write_info(header, &mut c, n_info, out)?;
+    write_samples(header, indiv, n_fmt, n_sample, out, scratch)
+}
+
+/// Appends the INFO column: `;`-separated `KEY` or `KEY=value` entries, or `.`.
+fn write_info(
+    header: &BcfHeader,
+    c: &mut Fields<'_>,
+    n_info: usize,
+    out: &mut String,
+) -> Result<()> {
+    if n_info == 0 {
+        out.push('.');
+    }
+    for i in 0..n_info {
+        if i > 0 {
+            out.push(';');
+        }
         let key = header.string_name(c.typed_scalar_int()?)?;
         let (ty, count) = c.descriptor()?;
-        let value = read_cell(&mut c, ty, count, false)?;
-        info_parts.push(if value.is_empty() { key.to_string() } else { format!("{key}={value}") });
+        out.push_str(key);
+        let eq = out.len();
+        out.push('=');
+        write_cell(c, ty, count, false, out)?;
+        if out.len() == eq + 1 {
+            out.truncate(eq);
+        }
     }
+    Ok(())
+}
 
-    let mut keys = Vec::with_capacity(n_fmt);
-    let mut cells: Vec<Vec<String>> = vec![Vec::with_capacity(n_fmt); n_sample];
+/// Appends the FORMAT key column and one column per sample, or nothing when the record
+/// has neither FORMAT keys nor samples. The individual section is field-major, so each
+/// cell is written once and its range recorded, then emitted sample-major.
+fn write_samples(
+    header: &BcfHeader,
+    indiv: &[u8],
+    n_fmt: usize,
+    n_sample: usize,
+    out: &mut String,
+    scratch: &mut DecodeScratch,
+) -> Result<()> {
+    let DecodeScratch { cells, spans, keys } = scratch;
+    cells.clear();
+    spans.clear();
+    keys.clear();
     let mut f = Fields::new(indiv);
     for _ in 0..n_fmt {
-        let key = header.string_name(f.typed_scalar_int()?)?;
+        let id = f.typed_scalar_int()?;
+        let key = header.string_name(id)?;
         let (ty, count) = f.descriptor()?;
-        for sample in &mut cells {
-            let text = read_cell(&mut f, ty, count, key == "GT")?;
-            sample.push(or_dot(text));
+        let is_gt = key == "GT";
+        for _ in 0..n_sample {
+            let start = cells.len();
+            write_cell(&mut f, ty, count, is_gt, cells)?;
+            spans.push((start, cells.len()));
         }
-        keys.push(key);
+        keys.push(id);
     }
-
-    let qual = if qual_bits == FLOAT_MISSING {
-        ".".to_string()
-    } else {
-        f32::from_bits(qual_bits).to_string()
-    };
-    let mut cols = vec![
-        chrom.to_string(),
-        pos.to_string(),
-        or_dot(id),
-        reference,
-        or_dot(alts.join(",")),
-        qual,
-        or_dot(filters.join(";")),
-        if info_parts.is_empty() { ".".to_string() } else { info_parts.join(";") },
-    ];
-    if n_fmt > 0 || n_sample > 0 {
-        cols.push(if keys.is_empty() { ".".to_string() } else { keys.join(":") });
-        for sample in &cells {
-            cols.push(if sample.is_empty() { ".".to_string() } else { sample.join(":") });
+    if n_fmt == 0 && n_sample == 0 {
+        return Ok(());
+    }
+    out.push('\t');
+    if n_fmt == 0 {
+        out.push('.');
+    }
+    for (i, &id) in keys.iter().enumerate() {
+        if i > 0 {
+            out.push(':');
+        }
+        out.push_str(header.string_name(id)?);
+    }
+    for s in 0..n_sample {
+        out.push('\t');
+        if n_fmt == 0 {
+            out.push('.');
+        }
+        for field in 0..n_fmt {
+            if field > 0 {
+                out.push(':');
+            }
+            let (start, end) = spans[field * n_sample + s];
+            if start == end {
+                out.push('.');
+            } else {
+                out.push_str(&cells[start..end]);
+            }
         }
     }
-    Ok(cols.join("\t"))
+    Ok(())
 }
 
 fn push_u32(buf: &mut Vec<u8>, v: u32) {
@@ -905,6 +1011,7 @@ pub struct BcfReader<R> {
     header: BcfHeader,
     buf: Vec<u8>,
     line: String,
+    scratch: DecodeScratch,
     n_records: u64,
 }
 
@@ -917,7 +1024,14 @@ impl<R: Read> BcfReader<R> {
     /// an invalid or unsupported header.
     pub fn new(mut inner: R) -> Result<Self> {
         let header = read_header(&mut inner)?;
-        Ok(Self { inner, header, buf: Vec::new(), line: String::new(), n_records: 0 })
+        Ok(Self {
+            inner,
+            header,
+            buf: Vec::new(),
+            line: String::new(),
+            scratch: DecodeScratch::default(),
+            n_records: 0,
+        })
     }
 
     /// The parsed BCF header.
@@ -936,7 +1050,13 @@ impl<R: Read> BcfReader<R> {
             return Ok(None);
         };
         self.n_records += 1;
-        self.line = decode_record(&self.header, &self.buf[..split], &self.buf[split..])?;
+        decode_record(
+            &self.header,
+            &self.buf[..split],
+            &self.buf[split..],
+            &mut self.line,
+            &mut self.scratch,
+        )?;
         VcfRecord::parse(&self.line, self.header.n_samples(), self.n_records).map(Some)
     }
 }
@@ -1075,6 +1195,7 @@ pub fn fetch_lines<R: Read + Seek>(
     let (q_beg, q_end) = (start - 1, end);
     let mut out = Vec::new();
     let mut buf = Vec::new();
+    let mut scratch = DecodeScratch::default();
     for chunk in index.query_by_id(tid, start, end) {
         reader.seek_virtual(chunk.beg)?;
         while reader.virtual_position() < chunk.end {
@@ -1083,7 +1204,9 @@ pub fn fetch_lines<R: Read + Seek>(
             };
             let (rtid, beg0, end0) = record_extent(&buf[..split])?;
             if rtid == tid && beg0 < q_end && end0 > q_beg {
-                out.push(decode_record(header, &buf[..split], &buf[split..])?);
+                let mut line = String::new();
+                decode_record(header, &buf[..split], &buf[split..], &mut line, &mut scratch)?;
+                out.push(line);
             }
         }
     }
@@ -1215,7 +1338,9 @@ mod tests {
     fn genotype_encoding_round_trips() {
         for text in ["0/1", "1|1", "./.", "0", ".", "2|0|1"] {
             let vals = parse_genotype(text).unwrap();
-            assert_eq!(genotype_text(&vals), text);
+            let mut s = String::new();
+            write_ints(&mut s, vals.iter().copied(), true);
+            assert_eq!(s, text);
         }
     }
 

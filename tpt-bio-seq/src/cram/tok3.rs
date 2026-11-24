@@ -13,7 +13,7 @@
 //! 6 for a copy of an earlier stream (two bytes name the source), and the low nibble
 //! for the stream type. A coded stream is a uint7 length followed by the stream's
 //! body, which is a rANS Nx16 stream when the flag is 0 and an adaptive arithmetic
-//! stream (see [`super::arith`]) when it is 1. uint7 is big-endian base-128.
+//! stream (the crate-private `arith` module) when it is 1. uint7 is big-endian base-128.
 
 use crate::cram::{arith, rans_nx16};
 use crate::error::{Result, SeqError};
@@ -249,17 +249,17 @@ impl Decoder {
         self.stream(id)?.next_byte().ok_or_else(|| malformed("byte stream exhausted"))
     }
 
-    /// A NUL-terminated string, without its terminator.
-    fn alpha_at(&mut self, id: usize) -> Result<Vec<u8>> {
+    /// Appends a NUL-terminated string, without its terminator, to `out`. Returns its length.
+    fn alpha_into(&mut self, id: usize, out: &mut Vec<u8>) -> Result<usize> {
         let s = self.stream(id)?;
-        let mut out = Vec::new();
-        loop {
-            let c = s.next_byte().ok_or_else(|| malformed("string stream exhausted"))?;
-            if c == 0 {
-                return Ok(out);
-            }
-            out.push(c);
-        }
+        let rest = &s.data[s.pos..];
+        let n = rest
+            .iter()
+            .position(|&c| c == 0)
+            .ok_or_else(|| malformed("string stream exhausted"))?;
+        out.extend_from_slice(&rest[..n]);
+        s.pos += n + 1;
+        Ok(n)
     }
 
     /// Decodes the name after the names in `names`, or `None` at the end of the names.
@@ -291,8 +291,10 @@ impl Decoder {
             return Ok(Some(prev.clone()));
         }
 
-        let mut bytes = Vec::new();
-        let mut toks = vec![Tok::default()];
+        // Names in a file have similar lengths, so the previous name sizes the buffers.
+        let mut bytes = Vec::with_capacity(prev.bytes.len() + 1);
+        let mut toks = Vec::with_capacity(self.max_tok.min(MAX_TOKENS));
+        toks.push(Tok::default());
         for ntok in 1..self.max_tok.min(MAX_TOKENS) {
             // An exhausted or unknown type ends the name, as the reference's elided END.
             let kind = self.type_at(ntok).unwrap_or(N_END);
@@ -303,11 +305,9 @@ impl Decoder {
                     Tok { kind: N_CHAR, int: u32::from(c), aux: 0 }
                 }
                 N_ALPHA => {
-                    let s = self.alpha_at(sid(ntok, N_ALPHA))?;
                     let aux = bytes.len();
-                    let int = s.len() as u32;
-                    bytes.extend_from_slice(&s);
-                    Tok { kind: N_ALPHA, int, aux }
+                    let len = self.alpha_into(sid(ntok, N_ALPHA), &mut bytes)?;
+                    Tok { kind: N_ALPHA, int: len as u32, aux }
                 }
                 N_DIGITS0 => {
                     let width = self.byte_at(sid(ntok, N_DZLEN))?;
@@ -387,15 +387,31 @@ fn check_match_position(ntok: usize, prev: &Name) -> Result<()> {
     Ok(())
 }
 
+/// Appends the decimal digits of `v`, zero-padded to at least `width` digits.
+fn push_digits(out: &mut Vec<u8>, mut v: u32, width: usize) {
+    let mut buf = [0u8; 10];
+    let mut n = 0;
+    loop {
+        buf[n] = b'0' + (v % 10) as u8;
+        n += 1;
+        v /= 10;
+        if v == 0 {
+            break;
+        }
+    }
+    out.extend(std::iter::repeat_n(b'0', width.saturating_sub(n)));
+    out.extend(buf[..n].iter().rev());
+}
+
 /// Appends `v` zero-padded to `width` digits.
 fn push_fixed(out: &mut Vec<u8>, v: u32, width: usize) {
-    out.extend_from_slice(format!("{v:0width$}").as_bytes());
+    push_digits(out, v, width);
 }
 
 /// Appends `v` in decimal. The reference prints nothing for zero, and so does this.
 fn push_var(out: &mut Vec<u8>, v: u32) {
     if v != 0 {
-        out.extend_from_slice(v.to_string().as_bytes());
+        push_digits(out, v, 0);
     }
 }
 

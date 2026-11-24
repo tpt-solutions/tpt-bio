@@ -11,6 +11,32 @@
 //! to check them against, so they are covered only by round-trip tests.
 
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
+
+/// A hash map with a cheap hasher. CRAM looks up small fixed keys (series, tags and
+/// external block ids) once per value, so `SipHash` dominates decoding time.
+pub(crate) type FastMap<K, V> = HashMap<K, V, BuildHasherDefault<KeyHasher>>;
+
+/// A multiplicative hasher for small integer and byte keys. It is not DoS-resistant, which is
+/// fine here: the keys come from the CRAM header, and their table is bounded.
+#[derive(Default)]
+pub(crate) struct KeyHasher(u64);
+
+impl Hasher for KeyHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0.rotate_left(8) ^ u64::from(b)).wrapping_mul(0x0100_0000_01B3);
+        }
+    }
+
+    fn write_i32(&mut self, i: i32) {
+        self.0 = u64::from(i as u32).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+}
 
 use crate::cram::bytes::Cursor;
 use crate::cram::compression::Encoding;
@@ -100,6 +126,9 @@ impl Codec {
     }
 }
 
+/// Content ids below this bound are looked up in a table rather than scanned.
+const DENSE_IDS: usize = 1024;
+
 /// An external block with its read position.
 #[derive(Debug)]
 struct External {
@@ -112,16 +141,29 @@ struct External {
 pub struct DataReader {
     core: Vec<u8>,
     core_bit: usize,
-    externals: HashMap<i32, External>,
+    /// External blocks, with their content ids in `ids` at the same index.
+    ids: Vec<i32>,
+    externals: Vec<External>,
+    /// For small non-negative content ids, the index into `externals` plus one (zero if none).
+    by_id: Vec<u32>,
 }
 
 impl DataReader {
     /// Creates a reader over `core` and `(content id, bytes)` external blocks.
     #[must_use]
     pub fn new(core: Vec<u8>, externals: Vec<(i32, Vec<u8>)>) -> Self {
-        let externals =
-            externals.into_iter().map(|(id, data)| (id, External { data, pos: 0 })).collect();
-        Self { core, core_bit: 0, externals }
+        let (ids, externals): (Vec<i32>, Vec<External>) =
+            externals.into_iter().map(|(id, data)| (id, External { data, pos: 0 })).unzip();
+        let mut by_id = vec![0u32; DENSE_IDS];
+        for (i, &id) in ids.iter().enumerate() {
+            // The first block with an id wins, as a scan would find it.
+            if let Some(slot) = usize::try_from(id).ok().and_then(|id| by_id.get_mut(id))
+                && *slot == 0
+            {
+                *slot = i as u32 + 1;
+            }
+        }
+        Self { core, core_bit: 0, ids, externals, by_id }
     }
 
     fn with_bits<T>(&mut self, f: impl FnOnce(&mut BitReader<'_>) -> Result<T>) -> Result<T> {
@@ -132,9 +174,16 @@ impl DataReader {
     }
 
     fn external(&mut self, id: i32) -> Result<&mut External> {
-        self.externals
-            .get_mut(&id)
-            .ok_or_else(|| SeqError::malformed(FORMAT, format!("missing external block {id}")))
+        // A slice has a handful of external blocks, so a scan beats hashing per value.
+        let dense = usize::try_from(id).ok().and_then(|id| self.by_id.get(id)).copied();
+        let found = match dense {
+            Some(slot) => slot.checked_sub(1).map(|i| i as usize),
+            None => self.ids.iter().position(|&known| known == id),
+        };
+        match found {
+            Some(i) => Ok(&mut self.externals[i]),
+            None => Err(SeqError::malformed(FORMAT, format!("missing external block {id}"))),
+        }
     }
 
     fn external_itf8(&mut self, id: i32) -> Result<i32> {
@@ -195,33 +244,74 @@ impl DataReader {
         u8::try_from(v).map_err(|_| SeqError::malformed(FORMAT, format!("byte value {v}")))
     }
 
+    /// Decodes `n` byte values with one codec. An external codec resolves its block once,
+    /// not once per byte.
+    ///
+    /// # Errors
+    /// As [`DataReader::byte`].
+    pub(crate) fn byte_run(&mut self, codec: &Codec, n: usize) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        self.byte_run_into(codec, n, &mut out)?;
+        Ok(out)
+    }
+
+    /// Appends `n` byte values decoded with one codec to `out`.
+    fn byte_run_into(&mut self, codec: &Codec, n: usize, out: &mut Vec<u8>) -> Result<()> {
+        if let Codec::External(id) = codec {
+            return self.external_run_into(*id, n, out);
+        }
+        out.reserve(n.min(1 << 16));
+        for _ in 0..n {
+            out.push(self.byte(codec)?);
+        }
+        Ok(())
+    }
+
+    /// Appends `n` bytes from an external block to `out`.
+    fn external_run_into(&mut self, id: i32, n: usize, out: &mut Vec<u8>) -> Result<()> {
+        let ext = self.external(id)?;
+        let rest = &ext.data[ext.pos.min(ext.data.len())..];
+        if rest.len() < n {
+            return Err(SeqError::malformed(FORMAT, format!("external block {id} exhausted")));
+        }
+        out.extend_from_slice(&rest[..n]);
+        ext.pos += n;
+        Ok(())
+    }
+
     /// Decodes one byte array.
     ///
     /// # Errors
     /// Returns [`SeqError::Malformed`] for a negative length or exhausted data.
     pub fn byte_array(&mut self, codec: &Codec) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        self.byte_array_into(codec, &mut out)?;
+        Ok(out)
+    }
+
+    /// Decodes one byte array and appends it to `out`. Returns the number of bytes appended.
+    ///
+    /// # Errors
+    /// As [`DataReader::byte_array`].
+    pub(crate) fn byte_array_into(&mut self, codec: &Codec, out: &mut Vec<u8>) -> Result<usize> {
         match codec {
-            Codec::Null => Ok(Vec::new()),
+            Codec::Null => Ok(0),
             Codec::ByteArrayLen { len, bytes } => {
                 let n = usize::try_from(self.int(len)?)
                     .map_err(|_| SeqError::malformed(FORMAT, "negative array length"))?;
-                let mut out = Vec::with_capacity(n.min(1 << 16));
-                for _ in 0..n {
-                    out.push(self.byte(bytes)?);
-                }
-                Ok(out)
+                self.byte_run_into(bytes, n, out)?;
+                Ok(n)
             }
             Codec::ByteArrayStop { stop, content_id } => {
                 let stop = *stop;
-                let id = *content_id;
-                let mut out = Vec::new();
-                loop {
-                    let b = self.external_byte(id)?;
-                    if b == stop {
-                        return Ok(out);
-                    }
-                    out.push(b);
-                }
+                let ext = self.external(*content_id)?;
+                let rest = &ext.data[ext.pos.min(ext.data.len())..];
+                let end = rest.iter().position(|&b| b == stop).ok_or_else(|| {
+                    SeqError::malformed(FORMAT, format!("external block {content_id} exhausted"))
+                })?;
+                out.extend_from_slice(&rest[..end]);
+                ext.pos += end + 1;
+                Ok(end)
             }
             _ => Err(SeqError::malformed(FORMAT, "integer encoding used for a byte array")),
         }

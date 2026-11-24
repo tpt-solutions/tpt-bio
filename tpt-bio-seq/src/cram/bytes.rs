@@ -8,18 +8,34 @@ use crate::error::{Result, SeqError};
 const FORMAT: &str = "CRAM";
 
 /// CRC32 (IEEE, reflected, polynomial 0xEDB88320) as used by CRAM block and
-/// container checksums. Implemented with a 256-entry table.
+/// container checksums. Uses slicing-by-8: eight table lookups per 8 input bytes.
 #[must_use]
 pub fn crc32(data: &[u8]) -> u32 {
+    let t = &CRC_TABLES;
     let mut crc: u32 = 0xFFFF_FFFF;
-    for &b in data {
-        crc = CRC_TABLE[((crc ^ u32::from(b)) & 0xFF) as usize] ^ (crc >> 8);
+    let mut chunks = data.chunks_exact(8);
+    for c in &mut chunks {
+        let lo = crc ^ u32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+        let hi = u32::from_le_bytes([c[4], c[5], c[6], c[7]]);
+        crc = t[7][(lo & 0xFF) as usize]
+            ^ t[6][((lo >> 8) & 0xFF) as usize]
+            ^ t[5][((lo >> 16) & 0xFF) as usize]
+            ^ t[4][(lo >> 24) as usize]
+            ^ t[3][(hi & 0xFF) as usize]
+            ^ t[2][((hi >> 8) & 0xFF) as usize]
+            ^ t[1][((hi >> 16) & 0xFF) as usize]
+            ^ t[0][(hi >> 24) as usize];
+    }
+    for &b in chunks.remainder() {
+        crc = t[0][((crc ^ u32::from(b)) & 0xFF) as usize] ^ (crc >> 8);
     }
     !crc
 }
 
-const CRC_TABLE: [u32; 256] = {
-    let mut table = [0u32; 256];
+/// `CRC_TABLES[0]` is the usual byte table; `CRC_TABLES[k][i]` is the CRC of byte `i`
+/// followed by `k` zero bytes.
+const CRC_TABLES: [[u32; 256]; 8] = {
+    let mut t = [[0u32; 256]; 8];
     let mut i = 0;
     while i < 256 {
         let mut c = i as u32;
@@ -28,10 +44,20 @@ const CRC_TABLE: [u32; 256] = {
             c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
             k += 1;
         }
-        table[i] = c;
+        t[0][i] = c;
         i += 1;
     }
-    table
+    let mut k = 1;
+    while k < 8 {
+        let mut i = 0;
+        while i < 256 {
+            let prev = t[k - 1][i];
+            t[k][i] = (prev >> 8) ^ t[0][(prev & 0xFF) as usize];
+            i += 1;
+        }
+        k += 1;
+    }
+    t
 };
 
 /// Appends an ITF8-encoded value. Values are treated as unsigned 32-bit.
