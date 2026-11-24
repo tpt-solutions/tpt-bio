@@ -15,6 +15,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 **Open decisions** (what is still open after the 2026-11-24 review)
 - **Poisson:** recommendation is to reimplement the PMF and CDF on `libm` (`lgamma`, incomplete gamma and beta) so the distributions work in `no_std`. Keep `tpt-math-prob-dist` as a dev-dependency oracle in tests. **Decided: recommendation followed.** Implemented on `libm`; no oracle crate is available offline, so tests use hand-computed values.
 - **Crates.io publishing:** `tpt-crypto` and `target-lexicon-mit` are git pins, and crates.io rejects git dependencies. Phase 6 needs published versions or vendored copies.
+- **wgpu and the Apache-2.0-only rule (decided 2026-11-25):** wgpu is rejected. Its tree has `codespan-reporting`, a non-optional naga dependency that is Apache-2.0 only, so no feature choice removes it. `gl_generator`, `glutin_wgl_sys` (Apache-2.0 only), `hexf-parse` (CC0-1.0) and `paste` (RUSTSEC-2024-0436) also fail the policy. Native GPU rendering is dropped. Browser WebGPU goes through `web-sys` and `wasm-bindgen` (MIT OR Apache-2.0) instead.
 - **TLS for remote I/O:** `tpt-crypto` covers SHA-256 and HMAC but not a TLS client. `tpt-crypto-rustls` is unaudited. **Decided for now: no TLS.** Remote I/O is plain `http://` only, and `https://` is rejected. SigV4 over `http://` sends signatures in cleartext, so this is not safe on untrusted networks.
 
 ---
@@ -41,7 +42,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Scaffold `tpt-bio-pipeline` _(contains the DAG model)_
 - [x] Scaffold `tpt-bio-cli` (binary `tptbio`)
 - [x] Scaffold `bindings/tpt-bio-py` (PyO3 + maturin `pyproject.toml`) _(separate workspace; see open decision on pyo3)_
-- [ ] Confirm tpt-math and tpt-simd versions and licenses (including `no_std` support) _(tpt-simd 0.1.1 is adopted and needs Rust 1.95, which is now the MSRV; its `no_std` features are not verified)_
+- [x] Confirm tpt-math and tpt-simd versions and licenses (including `no_std` support) _(tpt-simd 0.1.1 is `#![no_std]` with `alloc` and `std` as opt-in features, MIT OR Apache-2.0, and needs Rust 1.95, which is now the MSRV; licenses also pass `cargo deny`)_
 - [x] `unsafe` policy: `#![forbid(unsafe_code)]` where possible; document and isolate any exceptions (mmap, SIMD)
 
 ### Dependency license audit
@@ -165,14 +166,14 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 ### Hardening
 - [x] Fuzz targets for BGZF, BAM, VCF, BCF, CRAM, indexes _(targets for BGZF, BAM, BAI, FASTQ, SAM, VCF, BCF, tabix, FASTA and CRAM)_
 - [x] Malformed-input corpus tests (no panics, bounded memory) _(12 parsers, no panics found; zero-filled over-allocations fixed; bounded memory not asserted by tests)_
-- [ ] Benchmarks for VCF/BCF/CRAM vs bcftools/samtools _(BAM view, region and index timed against samtools; the benchmark harness is tpt-benchmark, pinned to 8384f44; VCF, BCF and CRAM not timed against bcftools or samtools yet)_
+- [ ] Benchmarks for VCF/BCF/CRAM vs bcftools/samtools _(300,000-record medians on one machine: VCF.gz to text 114 ms vs bcftools 165 ms; BCF to text 165 ms vs 111 ms; CRAM 3.1 to SAM text 819 ms vs samtools 150 ms (reference-free); BAM from the earlier round; harness is tpt-benchmark pinned to 8384f44, and the timings are not a comparable native-vs-native run)_
 
 ---
 
 ## Phase 3: Vision Core (`tpt-bio-vision`)
 
 ### Storage / I/O
-- [ ] `ByteSource` trait (local file, mmap, in-memory, HTTP) _(trait with in-memory and local-file sources in `tpt-bio-vision::source`; mmap source not wired, since the only mmap wrapper is in `tpt-bio-seq` and vision forbids `unsafe`; HTTP not started)_
+- [x] `ByteSource` trait (local file, mmap, in-memory, HTTP) _(trait with in-memory and local-file sources in `tpt-bio-vision::source`; `ByteSource` is implemented for `tpt_bio_seq::mmap::MappedFile`, so vision adds no `unsafe`; the caller opens the map with the unsafe `MappedFile::open` under its contract. Checked by a scratch binary that mapped a 4 MB file and read ranges through the trait, and by tests on the safe `MappedFile::from_vec`. HTTP is a separate item below)_
 - [x] HTTP range-read backend (permissive client, retry, caching) _(plain http only; https is rejected, since no TLS is used)_
 - [x] Own S3 SigV4 request signer (no AWS SDK) _(signer only; checked against the AWS ListUsers example vector)_
 - [x] Presigned-URL and public-bucket support
@@ -183,7 +184,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] OME-TIFF reader (OME-XML metadata, multi-series, Z/C/T planes, BigTIFF, tiled and striped) _(OME-XML is hand-written in tests, not Bio-Formats output; multi-file OME not supported)_
 - [x] Memory-mapped plane access _(MappedTiff is generic over its backing; mapping a file needs unsafe in tpt-bio-seq)_
 - [x] Zarr reader (v2, then v3; chunked, compressed with permissive codecs) _(v2 and v3 read with none and gzip; blosc and zstd return Unsupported)_
-- [ ] HCS plate layout (wells, fields, channels; OME-NGFF plate metadata) _(plate and well metadata and well names done; field and channel layout not verified)_
+- [x] HCS plate layout (wells, fields, channels; OME-NGFF plate metadata) _(parses NGFF 0.4 `.zattrs` and 0.5 `zarr.json`; `validate` checks the spec's MUST rules; `ImageChannels` reads each field's channel axis and omero labels, and `check_same_channels` compares fields. Verified against plates written by the reference `ome-zarr` 0.21.0 writer, fixtures in `tests/fixtures/hcs`; 16 tests, 2026-11-25)_
 - [x] ndarray integration for N-d image data _(Array2 and Array3 conversion)_
 - [x] Image writer (OME-TIFF and/or Zarr) for results and masks _(TIFF, PNG, OME-TIFF and Zarr v2 writers)_
 
@@ -195,7 +196,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Median / mean filters
 - [x] Edge detection (Sobel, Scharr, Canny) _(Canny has no built-in smoothing)_
 - [x] Morphology (erode, dilate, open, close, top-hat) in 2D/3D
-- [ ] Runtime feature detection (AVX2 / AVX-512 / NEON) with scalar fallback
+- [x] Runtime feature detection (AVX2 / AVX-512 / NEON) with scalar fallback _(`tpt-bio-vision::simd::backend()` reports the detected ISA; the `scalar-only` feature forces tpt-simd's scalar kernels; the 242 crate tests pass under both builds, 2026-11-25; benchmarks still open below)_
 - [ ] Benchmarks vs scalar baseline and reference implementations
 
 ### Segmentation
@@ -238,11 +239,11 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 
 ### 3D viewer (wgpu, ADR-003)
 - [x] Architecture note: share the rendering paradigm with tpt-vertex _(docs/architecture-3d-viewer.md; tpt-vertex not available, so the comparison is unverified)_
-- [ ] wgpu (check license expression) volume renderer: texture upload, ray-marching _(not started: CPU reference renderer only)_
+- [ ] wgpu (check license expression) volume renderer: texture upload, ray-marching _(**wgpu rejected** by the licence policy, see the open decisions. Native GPU rendering is dropped. The WGSL shader is `tpt-bio-vision/src/render3d/raycast.wgsl`, used by the browser path, and the retired wgpu host code is in `gpu-draft/wgpu_host.rs.txt`)_
 - [x] Label/mask overlay and per-cell coloring _(CPU renderer, first-hit blending)_
 - [x] Mesh / isosurface rendering of segmented cells _(marching tetrahedra and a flat-shaded CPU rasteriser)_
-- [ ] Large-volume handling (chunked/streamed, level of detail) _(block-max LOD with the usual rule: coarsest level whose voxels cover at most N pixels; no chunked streaming)_
-- [ ] Browser target (WASM + WebGPU) demo
+- [ ] Large-volume handling (chunked/streamed, level of detail) _(block-max LOD with the usual rule: coarsest level whose voxels cover at most N pixels; `render3d::stream` builds the levels from a `SlabSource` one z-slab at a time, tested equal to the in-memory result; no file-backed `SlabSource` yet and the viewer does not use streamed levels)_
+- [ ] Browser target (WASM + WebGPU) demo _(built: `tpt-bio-web` compiles for wasm32, `tpt-bio-vision` feature `webgpu` uses `web-sys` WebGPU with the same shader and packing as the CPU reference, and `wasm-bindgen` 0.2.130 generated the bindings. NOT yet run in a browser: the page needs an HTTP server, and starting one was denied, so the GPU output is unverified. Next step: serve `tpt-bio-web/www` and check `run_comparison` reports PASS in Chrome)_
 - [ ] Optional Tauri desktop app (license check for Tauri and its dependency tree)
 - [x] Camera controls, channel and clipping controls _(library API only; no interactive UI)_
 - [x] Viewer documentation and sample dataset _(docs/viewer.md and a sample-volume generator example)_
@@ -279,7 +280,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Release the GIL during heavy work _(sequence utilities only)_
 - [x] Python tests (pytest) _(5 tests, run against a locally built module)_
 - [ ] Wheels for Linux (manylinux), macOS (x86_64 + arm64), Windows via maturin in CI _(wheels.yml builds artifacts on manual dispatch only, not run; a Windows wheel built locally)_
-- [ ] Jupyter notebook example: results from the spec section 7 flow _(notebook code runs as a script; not executed as a notebook)_
+- [x] Jupyter notebook example: results from the spec section 7 flow _(`examples/spec7_flow.ipynb` executes end to end with nbclient on a locally built Windows wheel, 2 s, outputs saved; needs numpy, which the package does not declare)_
 
 ---
 
@@ -287,7 +288,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 
 ### Quality
 - [x] API review across all crates (naming, error types, semver surface) _(docs/api-review.md with 39 findings; not all fixed)_
-- [ ] Full rustdoc coverage, mdBook or docs site _(rustdoc passes with -D warnings for four crates; coverage not measured; no mdBook site)_
+- [x] Full rustdoc coverage, mdBook or docs site _(rustdoc passes with -D warnings for four crates; `missing_docs` reports 0 undocumented public items in all five library crates, checked 2026-11-25; no mdBook site, so the "or" branch is the docs-coverage half only)_
 - [x] Tutorials: seq quickstart, vision quickstart, pipeline, Python _(docs/tutorials, snippets run as examples; Python via a locally built wheel)_
 - [x] Performance regression checks in CI _(.github/workflows/perf.yml runs weekly and on demand, informational only; not run on GitHub)_
 - [ ] Extended fuzzing run, fix findings _(300 s per parser target, 60 s for CRAM; three BGZF/BCF/BAM over-allocation crashes fixed; longer runs not done)_
@@ -296,15 +297,15 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] `no_std` verification on an embedded target _(tpt-bio-core builds for thumbv7em-none-eabihf with --no-default-features)_
 
 ### License & compliance (final)
-- [ ] Full `cargo deny check` clean on the release commit _(bans, sources and licences pass; criterion, which brought in Apache-only ciborium, is removed; a stale borsh-derive entry remains in Cargo.lock but is not in the build graph; advisories not re-run on the release commit)_
+- [ ] Full `cargo deny check` clean on the release commit _(passes on the current working tree, 2026-11-25: advisories, bans, licences and sources all ok; criterion, which brought in Apache-only ciborium, is removed; a stale borsh-derive entry remains in Cargo.lock but is not in the build graph; still to re-run on the actual release commit, which does not exist yet)_
 - [x] Regenerate `docs/dependency-audit.md` and a third-party notices file _(THIRD_PARTY.md generated from cargo metadata, 214 packages; docs/dependency-audit.md updated)_
 - [x] Confirm zero-FFI: no `-sys` crates in the dependency tree (`cargo tree` check in CI) _(only windows-sys among -sys crates; pyo3-ffi only in the bindings, which CI now excludes on purpose; docs/zero-ffi.md)_
-- [ ] Confirm headers/Cargo metadata/LICENSE files consistent in all crates and in the Python package _(READMEs and readme keys are consistent; per-crate LICENSE files are not present)_
+- [x] Confirm headers/Cargo metadata/LICENSE files consistent in all crates and in the Python package _(READMEs and readme keys are consistent; `LICENSE-MIT` and `LICENSE-APACHE` copied byte-identical into each library and CLI crate and into `bindings/tpt-bio-py`; crates inherit `license` from the workspace)_
 
 ### Release
 - [ ] Choose final crate names and check availability on crates.io _(names listed; availability not checked, since there was no network access)_
 - [ ] Publish order: core -> seq / vision -> pipeline -> cli
-- [ ] `cargo publish --dry-run` for all crates _(not run; tpt-bio-vision depends on a git pin, `tpt-crypto-hash`, which crates.io rejects)_
+- [ ] `cargo publish --dry-run` for all crates _(run 2026-11-25, dry-run only, nothing uploaded: tpt-bio-core passes; seq, vision, pipeline and cli fail because tpt-bio-core is not on crates.io yet; tpt-bio-vision also depends on git pins, `tpt-crypto-hash` and `tpt-benchmark`, which crates.io rejects)_
 - [ ] Publish the Python package to PyPI
 - [ ] Tag `v0.1.0`, GitHub release, release notes
 - [ ] Announce (docs site, README badges)
