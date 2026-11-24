@@ -107,11 +107,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.95.0
-      - name: Fail if a C-library -sys crate is in the dependency tree
-        # windows-sys is Microsoft's raw OS API binding, pulled in by std-adjacent
-        # crates on Windows. It wraps no third-party C library, so it is excluded.
+      - name: Fail if a C-library -sys or -ffi crate is in the dependency tree
+        # Deliberate exclusions, both listed in docs/zero-ffi.md:
+        # - tpt-bio-py (the Python bindings) is excluded from the tree. It links
+        #   the Python C API through pyo3-ffi, which is an expected FFI link for an
+        #   extension module. Every other workspace crate is checked.
+        # - windows-sys is Microsoft's raw OS API binding, pulled in by std-adjacent
+        #   crates on Windows. It wraps no third-party C library, so it is excluded.
         run: |
-          if cargo tree --workspace --edges normal,build --prefix none               | grep -E '^[a-zA-Z0-9_-]+-sys ' | grep -v '^windows-sys ' ; then
-            echo "A -sys crate is in the dependency tree; the project must stay zero-FFI." >&2
+          if cargo tree --workspace --exclude tpt-bio-py --edges normal,build --prefix none \
+              | grep -E '^[a-zA-Z0-9_]+(-[a-zA-Z0-9_]+)*-(sys|ffi) ' \
+              | grep -v '^windows-sys ' ; then
+            echo "A -sys or -ffi crate is in the dependency tree; the project must stay zero-FFI." >&2
             exit 1
           fi
