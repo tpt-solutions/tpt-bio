@@ -27,7 +27,8 @@ fn scene(width: usize, height: usize) -> (Volume, Camera, TransferFunction, Rend
     for z in 0..d {
         for y in 0..h {
             for x in 0..w {
-                let r2 = (x as f32 - 6.0).powi(2) + (y as f32 - 5.0).powi(2) + (z as f32 - 4.0).powi(2);
+                let r2 =
+                    (x as f32 - 6.0).powi(2) + (y as f32 - 5.0).powi(2) + (z as f32 - 4.0).powi(2);
                 a.push(200.0 * (-r2 / 12.0).exp());
                 b.push(90.0 * (-(r2 - 20.0).powi(2) / 30.0).exp());
             }

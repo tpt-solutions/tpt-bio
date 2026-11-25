@@ -175,7 +175,8 @@ impl WebGpuRenderer {
 
         let mut voxel_data = Vec::with_capacity(voxels * channels);
         for c in 0..channels {
-            voxel_data.extend_from_slice(volume.channel(c).ok_or(RenderError::ChannelIndex(c))?.data());
+            voxel_data
+                .extend_from_slice(volume.channel(c).ok_or(RenderError::ChannelIndex(c))?.data());
         }
 
         let mut lut = Vec::with_capacity(channels * LUT_LEN);
@@ -200,12 +201,7 @@ impl WebGpuRenderer {
         };
         let params = pack_params(
             [dw as u32, dh as u32, dd as u32, channels as u32],
-            [
-                spacing[0] as f32,
-                spacing[1] as f32,
-                spacing[2] as f32,
-                settings.step as f32,
-            ],
+            [spacing[0] as f32, spacing[1] as f32, spacing[2] as f32, settings.step as f32],
             [LUT_LEN as u32, clip_on, w as u32, h as u32],
             clip,
             OPACITY_CUTOFF,
@@ -231,9 +227,8 @@ impl WebGpuRenderer {
             bind(4, &win_buf),
             bind(5, &out_buf),
         ];
-        let bind_group = self
-            .device
-            .create_bind_group(&GpuBindGroupDescriptor::new(&entries, &layout));
+        let bind_group =
+            self.device.create_bind_group(&GpuBindGroupDescriptor::new(&entries, &layout));
 
         let encoder = self.device.create_command_encoder();
         let pass = encoder.begin_compute_pass();

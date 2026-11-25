@@ -39,7 +39,12 @@ pub trait SlabSource {
     ///
     /// # Errors
     /// Implementations return a [`RenderError`] when the slab cannot be read.
-    fn read_slab(&mut self, channel: usize, z0: usize, z1: usize) -> Result<Image<f32>, RenderError>;
+    fn read_slab(
+        &mut self,
+        channel: usize,
+        z0: usize,
+        z1: usize,
+    ) -> Result<Image<f32>, RenderError>;
 }
 
 impl SlabSource for Volume {
@@ -55,7 +60,12 @@ impl SlabSource for Volume {
         Volume::spacing(self)
     }
 
-    fn read_slab(&mut self, channel: usize, z0: usize, z1: usize) -> Result<Image<f32>, RenderError> {
+    fn read_slab(
+        &mut self,
+        channel: usize,
+        z0: usize,
+        z1: usize,
+    ) -> Result<Image<f32>, RenderError> {
         let ch = self.channel(channel).ok_or(RenderError::ChannelIndex(channel))?;
         let (w, h, d) = ch.shape();
         if z0 > z1 || z1 > d {
@@ -120,7 +130,9 @@ pub fn downsample_streamed<S: SlabSource + ?Sized>(
             let z1 = (z0 + slab_depth).min(d);
             let slab = source.read_slab(c, z0, z1)?;
             if slab.shape() != (w, h, z1 - z0) {
-                return Err(RenderError::InvalidParameter("source returned a slab of the wrong shape"));
+                return Err(RenderError::InvalidParameter(
+                    "source returned a slab of the wrong shape",
+                ));
             }
             out.extend_from_slice(downsample_max(&slab, factor)?.data());
             z0 = z1;
@@ -227,7 +239,12 @@ impl<S: ByteSource, T: Sample + Into<f32>> SlabSource for OmeSlabs<'_, S, T> {
         self.spacing
     }
 
-    fn read_slab(&mut self, channel: usize, z0: usize, z1: usize) -> Result<Image<f32>, RenderError> {
+    fn read_slab(
+        &mut self,
+        channel: usize,
+        z0: usize,
+        z1: usize,
+    ) -> Result<Image<f32>, RenderError> {
         if channel >= self.channels {
             return Err(RenderError::ChannelIndex(channel));
         }
@@ -309,7 +326,12 @@ impl<St: ZarrStore, T: ZarrElement + Into<f32>> SlabSource for ZarrSlabs<St, T> 
         self.spacing
     }
 
-    fn read_slab(&mut self, channel: usize, z0: usize, z1: usize) -> Result<Image<f32>, RenderError> {
+    fn read_slab(
+        &mut self,
+        channel: usize,
+        z0: usize,
+        z1: usize,
+    ) -> Result<Image<f32>, RenderError> {
         if channel >= self.channels {
             return Err(RenderError::ChannelIndex(channel));
         }
@@ -322,10 +344,8 @@ impl<St: ZarrStore, T: ZarrElement + Into<f32>> SlabSource for ZarrSlabs<St, T> 
         } else {
             (vec![z0, 0, 0], vec![z1, h, w])
         };
-        let values = self
-            .array
-            .read_block::<T>(&lo, &hi)
-            .map_err(|e| RenderError::Read(e.to_string()))?;
+        let values =
+            self.array.read_block::<T>(&lo, &hi).map_err(|e| RenderError::Read(e.to_string()))?;
         Ok(Image::new_3d(w, h, z1 - z0, values.into_iter().map(Into::into).collect())?)
     }
 }
@@ -458,7 +478,12 @@ mod tests {
             fn spacing(&self) -> [f64; 3] {
                 self.0.spacing()
             }
-            fn read_slab(&mut self, _: usize, _: usize, _: usize) -> Result<Image<f32>, RenderError> {
+            fn read_slab(
+                &mut self,
+                _: usize,
+                _: usize,
+                _: usize,
+            ) -> Result<Image<f32>, RenderError> {
                 Ok(pattern(1, 1, 1, 0))
             }
         }
@@ -510,8 +535,10 @@ mod tests {
         let factors = [1usize, 2, 4, 8];
         let mut near_src = vol.clone();
         let mut far_src = vol.clone();
-        let (near, _) = stream_level_for_camera(&mut near_src, &camera_at(3.0), &factors, 1.5, 8192).unwrap();
-        let (far, _) = stream_level_for_camera(&mut far_src, &camera_at(3000.0), &factors, 1.5, 8192).unwrap();
+        let (near, _) =
+            stream_level_for_camera(&mut near_src, &camera_at(3.0), &factors, 1.5, 8192).unwrap();
+        let (far, _) =
+            stream_level_for_camera(&mut far_src, &camera_at(3000.0), &factors, 1.5, 8192).unwrap();
         assert!(far > near, "far {far} should exceed near {near}");
     }
 
@@ -638,7 +665,8 @@ mod tests {
         let store = MemStore::default();
         // 8 slices in chunks of 2 deep, 6 rows in chunks of 3 high, 8 columns in chunks of 4 wide.
         zarr_volume(&store, 8, 6, 8, &[2, 3, 4]);
-        let mut slabs = ZarrSlabs::<_, u16>::new(ZarrArray::open(&store, "vol").unwrap(), [1.0; 3]).unwrap();
+        let mut slabs =
+            ZarrSlabs::<_, u16>::new(ZarrArray::open(&store, "vol").unwrap(), [1.0; 3]).unwrap();
         *store.gets.lock().unwrap() = 0;
         // Slices 2..4 lie in one slice-chunk layer. That is 2 row chunks x 2 column chunks.
         slabs.read_slab(0, 2, 4).unwrap();
@@ -650,7 +678,14 @@ mod tests {
         let store = MemStore::default();
         // Two channels of 4 slices, 3 x 5 each, written as one [c, z, y, x] array.
         let data: Vec<u16> = (0..2 * 4 * 3 * 5).map(|i| i as u16).collect();
-        let arr = crate::io::zarr::write_array_v2(&store, "four", &[2, 4, 3, 5], &[1, 2, 3, 5], &data, Compressor::None);
+        let arr = crate::io::zarr::write_array_v2(
+            &store,
+            "four",
+            &[2, 4, 3, 5],
+            &[1, 2, 3, 5],
+            &data,
+            Compressor::None,
+        );
         arr.unwrap();
         let zarr = ZarrArray::open(&store, "four").unwrap();
         let block = zarr.read_block::<u16>(&[1, 1, 0, 2], &[2, 3, 2, 5]).unwrap();
@@ -670,6 +705,8 @@ mod tests {
         let want_f32: Vec<f32> = data[4 * 3 * 5..].iter().map(|&v| f32::from(v)).collect();
         assert_eq!(slab.data(), &want_f32[..]);
         assert!(slabs.read_slab(2, 0, 1).is_err());
-        assert!(ZarrSlabs::<_, f32>::new(ZarrArray::open(&store, "four").unwrap(), [1.0; 3]).is_err());
+        assert!(
+            ZarrSlabs::<_, f32>::new(ZarrArray::open(&store, "four").unwrap(), [1.0; 3]).is_err()
+        );
     }
 }

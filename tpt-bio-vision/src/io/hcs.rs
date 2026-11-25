@@ -185,7 +185,9 @@ fn parse_root(json: &str, what: &str) -> FormatResult<Value> {
 /// object itself, so this is the fallback for a well with no `version` of its own.
 fn ome_version(root: &Value) -> Option<String> {
     root.get("version")
-        .or_else(|| root.get("attributes").and_then(|a| a.get("ome")).and_then(|o| o.get("version")))
+        .or_else(|| {
+            root.get("attributes").and_then(|a| a.get("ome")).and_then(|o| o.get("version"))
+        })
         .and_then(Value::as_str)
         .map(str::to_owned)
 }
@@ -215,7 +217,9 @@ pub fn well_index(rows: &[String], columns: &[String], name: &str) -> FormatResu
     let column = columns
         .iter()
         .position(|c| c.trim().parse::<u32>().ok() == Some(parsed.column))
-        .ok_or_else(|| FormatError::Invalid(format!("column {} not in plate", parsed.column)))?;
+        .ok_or_else(|| {
+        FormatError::Invalid(format!("column {} not in plate", parsed.column))
+    })?;
     Ok((row, column))
 }
 
@@ -299,7 +303,8 @@ impl PlateMeta {
         }
         let mut positions = HashSet::new();
         for w in &self.wells {
-            let (Some(row), Some(col)) = (self.rows.get(w.row_index), self.columns.get(w.column_index))
+            let (Some(row), Some(col)) =
+                (self.rows.get(w.row_index), self.columns.get(w.column_index))
             else {
                 return Err(FormatError::Invalid(format!(
                     "well {:?} has an index outside the plate",
@@ -386,10 +391,16 @@ impl WellMeta {
         let mut paths = HashSet::new();
         for img in &self.images {
             if !is_ngff_name(&img.path) {
-                return Err(FormatError::Invalid(format!("field path {:?} is not alphanumeric", img.path)));
+                return Err(FormatError::Invalid(format!(
+                    "field path {:?} is not alphanumeric",
+                    img.path
+                )));
             }
             if !paths.insert(img.path.as_str()) {
-                return Err(FormatError::Invalid(format!("field path {:?} is duplicated", img.path)));
+                return Err(FormatError::Invalid(format!(
+                    "field path {:?} is duplicated",
+                    img.path
+                )));
             }
         }
         let Some(plate) = plate else { return Ok(()) };
@@ -406,7 +417,9 @@ impl WellMeta {
         for img in &self.images {
             match img.acquisition {
                 Some(id) => {
-                    if !plate.acquisitions.is_empty() && !plate.acquisitions.iter().any(|a| a.id == id) {
+                    if !plate.acquisitions.is_empty()
+                        && !plate.acquisitions.iter().any(|a| a.id == id)
+                    {
                         return Err(FormatError::Invalid(format!(
                             "field {:?} names acquisition {id}, which the plate does not define",
                             img.path
@@ -466,9 +479,13 @@ impl ImageChannels {
                         .ok_or_else(|| FormatError::Decode("axis object has no name".into()))?;
                     (name.to_owned(), o.get("type").and_then(Value::as_str))
                 }
-                _ => return Err(FormatError::Decode("axis is neither a name nor an object".into())),
+                _ => {
+                    return Err(FormatError::Decode("axis is neither a name nor an object".into()));
+                }
             };
-            if channel_axis.is_none() && (kind == Some("channel") || (kind.is_none() && name == "c")) {
+            if channel_axis.is_none()
+                && (kind == Some("channel") || (kind.is_none() && name == "c"))
+            {
                 channel_axis = Some(i);
             }
             axes.push(name);
@@ -477,7 +494,9 @@ impl ImageChannels {
             .and_then(|o| o.get("channels"))
             .and_then(Value::as_array)
             .map(|chs| {
-                chs.iter().map(|c| c.get("label").and_then(Value::as_str).map(str::to_owned)).collect()
+                chs.iter()
+                    .map(|c| c.get("label").and_then(Value::as_str).map(str::to_owned))
+                    .collect()
             })
             .unwrap_or_default();
         Ok(Self { axes, channel_axis, labels })
@@ -771,7 +790,10 @@ mod tests {
             let well = WellMeta::from_zattrs(json).unwrap();
             well.validate(Some(&plate)).unwrap_or_else(|e| panic!("well {name}: {e}"));
             assert_eq!(well.images.len(), 2, "well {name}");
-            assert_eq!(well.version.as_deref(), Some(if plate.version.as_deref() == Some("0.4") { "0.4" } else { "0.5" }));
+            assert_eq!(
+                well.version.as_deref(),
+                Some(if plate.version.as_deref() == Some("0.4") { "0.4" } else { "0.5" })
+            );
         }
         let layouts: Vec<ImageChannels> =
             fields.iter().map(|j| ImageChannels::from_zattrs(j).unwrap()).collect();
