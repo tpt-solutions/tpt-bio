@@ -590,6 +590,19 @@ impl<St: ZarrStore> ZarrArray<St> {
     /// Returns [`FormatError::Invalid`] if `T` does not match the stored element
     /// type, and decode or I/O errors for chunks that cannot be read.
     pub fn read<T: ZarrElement>(&self) -> FormatResult<Vec<T>> {
+        let origin = vec![0usize; self.meta.shape.len()];
+        self.read_block(&origin, &self.meta.shape)
+    }
+
+    /// Reads the block `lo..hi` on every axis, in C order. Only the chunks that overlap the
+    /// block are fetched, so a thin slab of a large array costs little I/O. Missing chunks
+    /// read as the fill value.
+    ///
+    /// # Errors
+    /// Returns [`FormatError::Invalid`] if `T` does not match the stored element type, if
+    /// `lo` and `hi` do not have one entry per axis, or if the block is not inside the array.
+    /// Returns decode or I/O errors for chunks that cannot be read.
+    pub fn read_block<T: ZarrElement>(&self, lo: &[usize], hi: &[usize]) -> FormatResult<Vec<T>> {
         let dt = self.meta.dtype;
         if dt.kind != T::KIND || dt.size != T::SIZE {
             return Err(FormatError::Invalid(format!(
@@ -602,18 +615,33 @@ impl<St: ZarrStore> ZarrArray<St> {
         }
         let shape = &self.meta.shape;
         let chunks = &self.meta.chunks;
-        let total: usize = shape.iter().product();
+        let n = shape.len();
+        if lo.len() != n || hi.len() != n {
+            return Err(FormatError::Invalid(format!("block needs {n} bounds per axis")));
+        }
+        for d in 0..n {
+            if lo[d] > hi[d] || hi[d] > shape[d] {
+                return Err(FormatError::Invalid(format!(
+                    "block {}..{} is outside axis {d} of length {}",
+                    lo[d], hi[d], shape[d]
+                )));
+            }
+        }
+        let block: Vec<usize> = lo.iter().zip(hi).map(|(&a, &b)| b - a).collect();
+        let total: usize = block.iter().product();
         let mut out = vec![T::from_f64(self.meta.fill_value); total];
         if total == 0 {
             return Ok(out);
         }
-        let grid: Vec<usize> = shape.iter().zip(chunks).map(|(&s, &c)| s.div_ceil(c)).collect();
+        let first: Vec<usize> = lo.iter().zip(chunks).map(|(&a, &c)| a / c).collect();
+        let counts: Vec<usize> = (0..n).map(|d| (hi[d] - 1) / chunks[d] - first[d] + 1).collect();
         let chunk_elems: usize = chunks.iter().product();
-        let strides = c_strides(shape);
+        let block_strides = c_strides(&block);
         let big = dt.big_endian;
 
-        for_each_index(&grid, Order::C, |ci| {
-            let key = self.chunk_key(ci);
+        for_each_index(&counts, Order::C, |rel| {
+            let ci: Vec<usize> = first.iter().zip(rel).map(|(&f, &r)| f + r).collect();
+            let key = self.chunk_key(&ci);
             let Some(stored) = self.store.get(&key)? else {
                 return Ok(());
             };
@@ -629,13 +657,13 @@ impl<St: ZarrStore> ZarrArray<St> {
             for_each_index(chunks, self.meta.order, |j| {
                 let mut lin = 0usize;
                 let mut inside = true;
-                for d in 0..shape.len() {
+                for d in 0..n {
                     let g = ci[d] * chunks[d] + j[d];
-                    if g >= shape[d] {
+                    if g < lo[d] || g >= hi[d] {
                         inside = false;
                         break;
                     }
-                    lin += g * strides[d];
+                    lin += (g - lo[d]) * block_strides[d];
                 }
                 if inside {
                     out[lin] = T::decode(&raw[k * T::SIZE..], big);

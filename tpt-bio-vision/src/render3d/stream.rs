@@ -21,6 +21,7 @@ use super::volume::Volume;
 use crate::image::Image;
 use crate::io::ome::OmeTiff;
 use crate::io::sample::Sample;
+use crate::io::zarr::{ZarrArray, ZarrElement, ZarrStore};
 use crate::source::ByteSource;
 
 /// A volume that can be read one z-slab at a time.
@@ -243,6 +244,89 @@ impl<S: ByteSource, T: Sample + Into<f32>> SlabSource for OmeSlabs<'_, S, T> {
             data.extend(plane.data().iter().map(|&v| Into::<f32>::into(v)));
         }
         Ok(Image::new_3d(w, h, z1 - z0, data)?)
+    }
+}
+
+/// A Zarr array holding a volume, read one z-slab at a time.
+///
+/// The array is `[z, y, x]` for one channel, or `[c, z, y, x]` for several. Each slab reads
+/// only the chunks that overlap it, through [`ZarrArray::read_block`].
+pub struct ZarrSlabs<St: ZarrStore, T> {
+    array: ZarrArray<St>,
+    shape: (usize, usize, usize),
+    channels: usize,
+    spacing: [f64; 3],
+    _sample: PhantomData<T>,
+}
+
+impl<St: ZarrStore, T> std::fmt::Debug for ZarrSlabs<St, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ZarrSlabs")
+            .field("shape", &self.shape)
+            .field("channels", &self.channels)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<St: ZarrStore, T: ZarrElement + Into<f32>> ZarrSlabs<St, T> {
+    /// Wraps a `[z, y, x]` or `[c, z, y, x]` array.
+    ///
+    /// # Errors
+    /// Returns [`RenderError::InvalidParameter`] if the array is neither 3-D nor 4-D, if its
+    /// element type is not `T`, or if the spacing is not positive.
+    pub fn new(array: ZarrArray<St>, spacing: [f64; 3]) -> Result<Self, RenderError> {
+        let (channels, dims) = match array.shape() {
+            [z, y, x] => (1, [*z, *y, *x]),
+            [c, z, y, x] => (*c, [*z, *y, *x]),
+            _ => return Err(RenderError::InvalidParameter("Zarr array must be 3-D or 4-D")),
+        };
+        if array.meta().dtype.kind != T::KIND || array.meta().dtype.size != T::SIZE {
+            return Err(RenderError::InvalidParameter("Zarr element type does not match T"));
+        }
+        if spacing.iter().any(|s| !s.is_finite() || *s <= 0.0) {
+            return Err(RenderError::InvalidParameter("voxel spacing must be finite and positive"));
+        }
+        Ok(Self {
+            array,
+            shape: (dims[2], dims[1], dims[0]),
+            channels,
+            spacing,
+            _sample: PhantomData,
+        })
+    }
+}
+
+impl<St: ZarrStore, T: ZarrElement + Into<f32>> SlabSource for ZarrSlabs<St, T> {
+    fn shape(&self) -> (usize, usize, usize) {
+        self.shape
+    }
+
+    fn channel_count(&self) -> usize {
+        self.channels
+    }
+
+    fn spacing(&self) -> [f64; 3] {
+        self.spacing
+    }
+
+    fn read_slab(&mut self, channel: usize, z0: usize, z1: usize) -> Result<Image<f32>, RenderError> {
+        if channel >= self.channels {
+            return Err(RenderError::ChannelIndex(channel));
+        }
+        let (w, h, d) = self.shape;
+        if z0 > z1 || z1 > d {
+            return Err(RenderError::InvalidParameter("slab range is outside the volume"));
+        }
+        let (lo, hi) = if self.array.shape().len() == 4 {
+            (vec![channel, z0, 0, 0], vec![channel + 1, z1, h, w])
+        } else {
+            (vec![z0, 0, 0], vec![z1, h, w])
+        };
+        let values = self
+            .array
+            .read_block::<T>(&lo, &hi)
+            .map_err(|e| RenderError::Read(e.to_string()))?;
+        Ok(Image::new_3d(w, h, z1 - z0, values.into_iter().map(Into::into).collect())?)
     }
 }
 
@@ -502,5 +586,90 @@ mod tests {
             let want = &reference.channel(0).unwrap().data()[c * sz * w * h..(c + 1) * sz * w * h];
             assert_eq!(slab.data(), want, "channel {c}");
         }
+    }
+
+    use crate::io::zarr::{Compressor, write_image_v2};
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    /// An in-memory Zarr store that counts chunk reads.
+    #[derive(Default)]
+    struct MemStore {
+        keys: Mutex<HashMap<String, Vec<u8>>>,
+        gets: Mutex<usize>,
+    }
+
+    impl ZarrStore for MemStore {
+        fn get(&self, key: &str) -> crate::io::FormatResult<Option<Vec<u8>>> {
+            *self.gets.lock().unwrap() += 1;
+            Ok(self.keys.lock().unwrap().get(key).cloned())
+        }
+
+        fn set(&self, key: &str, value: &[u8]) -> crate::io::FormatResult<()> {
+            self.keys.lock().unwrap().insert(key.to_owned(), value.to_vec());
+            Ok(())
+        }
+    }
+
+    fn zarr_volume(store: &MemStore, w: usize, h: usize, d: usize, chunks: &[usize]) -> Image<u16> {
+        let data: Vec<u16> = (0..w * h * d).map(|i| ((i * 53) % 1009) as u16).collect();
+        let img = Image::new_3d(w, h, d, data).unwrap();
+        write_image_v2(&store, "vol", &img, chunks, Compressor::None).unwrap();
+        img
+    }
+
+    #[test]
+    fn render3d_stream_zarr_slabs_match_in_memory_volume() {
+        let store = MemStore::default();
+        let img = zarr_volume(&store, 9, 7, 8, &[3, 4, 5]);
+        let reference = Volume::from_u16(std::slice::from_ref(&img), [1.0, 1.0, 2.0]).unwrap();
+        for depth in [2usize, 4, 8] {
+            let mut slabs =
+                ZarrSlabs::<_, u16>::new(ZarrArray::open(&store, "vol").unwrap(), [1.0, 1.0, 2.0])
+                    .unwrap();
+            assert_eq!(slabs.shape(), (9, 7, 8));
+            let got = downsample_streamed(&mut slabs, 2, depth).unwrap();
+            assert_eq!(got, reference.downsample_max(2).unwrap(), "slab depth {depth}");
+        }
+    }
+
+    #[test]
+    fn render3d_stream_zarr_slab_reads_only_overlapping_chunks() {
+        let store = MemStore::default();
+        // 8 slices in chunks of 2 deep, 6 rows in chunks of 3 high, 8 columns in chunks of 4 wide.
+        zarr_volume(&store, 8, 6, 8, &[2, 3, 4]);
+        let mut slabs = ZarrSlabs::<_, u16>::new(ZarrArray::open(&store, "vol").unwrap(), [1.0; 3]).unwrap();
+        *store.gets.lock().unwrap() = 0;
+        // Slices 2..4 lie in one slice-chunk layer. That is 2 row chunks x 2 column chunks.
+        slabs.read_slab(0, 2, 4).unwrap();
+        assert_eq!(*store.gets.lock().unwrap(), 4);
+    }
+
+    #[test]
+    fn render3d_stream_zarr_four_d_channels_and_block_reads() {
+        let store = MemStore::default();
+        // Two channels of 4 slices, 3 x 5 each, written as one [c, z, y, x] array.
+        let data: Vec<u16> = (0..2 * 4 * 3 * 5).map(|i| i as u16).collect();
+        let arr = crate::io::zarr::write_array_v2(&store, "four", &[2, 4, 3, 5], &[1, 2, 3, 5], &data, Compressor::None);
+        arr.unwrap();
+        let zarr = ZarrArray::open(&store, "four").unwrap();
+        let block = zarr.read_block::<u16>(&[1, 1, 0, 2], &[2, 3, 2, 5]).unwrap();
+        // Channel 1, slices 1..3, rows 0..2, columns 2..5.
+        let mut want = Vec::new();
+        for z in 1..3 {
+            for y in 0..2 {
+                for x in 2..5 {
+                    want.push(data[((4 + z) * 3 + y) * 5 + x]);
+                }
+            }
+        }
+        assert_eq!(block, want);
+        let mut slabs = ZarrSlabs::<_, u16>::new(zarr, [1.0; 3]).unwrap();
+        assert_eq!(slabs.channel_count(), 2);
+        let slab = slabs.read_slab(1, 0, 4).unwrap();
+        let want_f32: Vec<f32> = data[4 * 3 * 5..].iter().map(|&v| f32::from(v)).collect();
+        assert_eq!(slab.data(), &want_f32[..]);
+        assert!(slabs.read_slab(2, 0, 1).is_err());
+        assert!(ZarrSlabs::<_, f32>::new(ZarrArray::open(&store, "four").unwrap(), [1.0; 3]).is_err());
     }
 }
