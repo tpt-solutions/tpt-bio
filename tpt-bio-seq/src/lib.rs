@@ -37,5 +37,5 @@ pub use ops::{Flagstat, MergeSorted, sort_coordinate, sort_name};
 pub use record::{CigarKind, CigarOp, Flags, Record, Tag, TagValue};
 pub use sam::{SamReader, SamWriter};
 pub use tabix::{IndexKind, TabixConfig, TabixIndex};
-pub use table::{records_to_csv, records_to_jsonl, records_to_table};
+pub use table::{records_to_csv, records_to_jsonl, records_to_rows, records_to_table};
 pub use vcf::{MetaLine, VcfHeader, VcfReader, VcfRecord, VcfWriter};

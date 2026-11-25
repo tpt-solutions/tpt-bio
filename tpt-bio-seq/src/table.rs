@@ -129,6 +129,37 @@ pub fn records_to_table(records: &[Record], header: &Header) -> Result<Table> {
 ///
 /// # Errors
 /// Returns an error if the table cannot be built. See [`records_to_table`].
+/// The column names and the cell text of [`records_to_table`], one `Vec<String>` per row.
+///
+/// Null cells are empty strings. This is the same content as [`records_to_csv`], without
+/// CSV quoting, so callers can lay it out in any format.
+///
+/// # Errors
+/// Same as [`records_to_table`].
+pub fn records_to_rows(
+    records: &[Record],
+    header: &Header,
+) -> Result<(Vec<String>, Vec<Vec<String>>)> {
+    let table = records_to_table(records, header)?;
+    let names: Vec<String> = table.schema().fields.iter().map(|f| f.name.clone()).collect();
+    let mut rows = Vec::with_capacity(table.batches().iter().map(|b| b.row_count()).sum());
+    for batch in table.batches() {
+        for r in 0..batch.row_count() {
+            rows.push(
+                batch
+                    .columns
+                    .iter()
+                    .map(|c| match c.get(r) {
+                        Some(Scalar::Null) | None => String::new(),
+                        Some(v) => v.to_string(),
+                    })
+                    .collect(),
+            );
+        }
+    }
+    Ok((names, rows))
+}
+
 pub fn records_to_csv(records: &[Record], header: &Header) -> Result<String> {
     Ok(tpt_strata::csv::to_csv(&records_to_table(records, header)?))
 }
@@ -169,6 +200,23 @@ r2\t4\t*\t0\t0\t*\t*\t0\t0\tAC\t*\n";
         assert_eq!(lines.next().unwrap(), "r1,99,chr1,101,60,4M,=,201,150,ACGT,IIII");
         // The unmapped record has empty (NULL) reference and position fields.
         assert_eq!(lines.next().unwrap(), "r2,4,,,0,,,,0,AC,");
+    }
+
+    #[test]
+    fn rows_match_csv_cells_without_quoting() {
+        let mut reader = SamReader::new(SAM.as_bytes()).unwrap();
+        let header = reader.header().clone();
+        let mut records = Vec::new();
+        while let Some(r) = reader.next_record().unwrap() {
+            records.push(r);
+        }
+        let (names, rows) = records_to_rows(&records, &header).unwrap();
+        assert_eq!(names, COLUMNS);
+        assert_eq!(rows.len(), records.len());
+        assert_eq!(rows[0].join(","), "r1,99,chr1,101,60,4M,=,201,150,ACGT,IIII");
+        // The unmapped record has empty (NULL) reference and position cells.
+        assert_eq!(rows[1][2], "");
+        assert_eq!(rows[1][3], "");
     }
 }
 
