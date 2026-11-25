@@ -479,6 +479,15 @@ pub fn scan_blocks(data: &[u8]) -> Result<Vec<BlockSpan>> {
         if pos + size > data.len() {
             return Err(SeqError::malformed_at("BGZF", pos as u64, "truncated block"));
         }
+        // A block must hold its own header and footer. A smaller declared size would make
+        // the payload split below underflow.
+        if size < FIXED_HEADER_LEN + xlen + FOOTER_LEN {
+            return Err(SeqError::malformed_at(
+                "BGZF",
+                pos as u64,
+                "block is too small for its header and footer",
+            ));
+        }
         spans.push(BlockSpan { start: pos, size });
         pos += size;
     }
@@ -500,8 +509,14 @@ pub fn decompress_parallel(data: &[u8]) -> Result<Vec<u8>> {
             let block = &data[span.start..span.start + span.size];
             let xlen = check_fixed_header(block)?;
             let consumed = FIXED_HEADER_LEN + xlen;
-            let rest = &block[consumed..];
-            let (cdata, footer) = rest.split_at(rest.len() - FOOTER_LEN);
+            let rest = block
+                .get(consumed..)
+                .ok_or_else(|| SeqError::malformed("BGZF", "block shorter than its header"))?;
+            let split = rest
+                .len()
+                .checked_sub(FOOTER_LEN)
+                .ok_or_else(|| SeqError::malformed("BGZF", "block shorter than its footer"))?;
+            let (cdata, footer) = rest.split_at(split);
             let crc = u32::from_le_bytes([footer[0], footer[1], footer[2], footer[3]]);
             let isize = u32::from_le_bytes([footer[4], footer[5], footer[6], footer[7]]);
             inflate_block(cdata, crc, isize)
@@ -632,5 +647,17 @@ mod tests {
         let mut r = BgzfReader::new(Cursor::new(&file));
         assert_eq!(r.read_to_vec().unwrap(), data);
         assert!(!r.has_eof_marker());
+    }
+
+    #[test]
+    fn block_smaller_than_its_header_and_footer_is_malformed() {
+        // Header with a BC subfield declaring BSIZE 20, so the block is 21 bytes. That is too
+        // small for the 12-byte header, 6-byte extra field and 8-byte footer, which need 26.
+        let mut data = vec![0x1f, 0x8b, 8, 0x04, 0, 0, 0, 0, 0, 0xff];
+        data.extend_from_slice(&[6, 0]);
+        data.extend_from_slice(&[b'B', b'C', 2, 0, 20, 0]);
+        data.extend_from_slice(&[0, 0, 0]);
+        assert!(scan_blocks(&data).is_err());
+        assert!(decompress_parallel(&data).is_err());
     }
 }
