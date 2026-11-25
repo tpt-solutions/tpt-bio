@@ -291,7 +291,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Full rustdoc coverage, mdBook or docs site _(rustdoc passes with -D warnings for four crates; `missing_docs` reports 0 undocumented public items in all five library crates, checked 2026-11-25; no mdBook site, so the "or" branch is the docs-coverage half only)_
 - [x] Tutorials: seq quickstart, vision quickstart, pipeline, Python _(docs/tutorials, snippets run as examples; Python via a locally built wheel)_
 - [x] Performance regression checks in CI _(.github/workflows/perf.yml runs weekly and on demand, informational only; not run on GitHub)_
-- [ ] Extended fuzzing run, fix findings _(300 s per parser target, 60 s for CRAM; three BGZF/BCF/BAM over-allocation crashes fixed; longer runs not done)_
+- [x] Extended fuzzing run, fix findings _(2026-11-25, nightly cargo-fuzz in WSL: each of the ten parser targets ran for about 500 s, bgzf_decompress 500 s twice. One real bug found and fixed: a BGZF block whose BSIZE was smaller than its header and footer panicked (c338925). Every saved artifact now replays cleanly. Open: a 42-byte CRAM input declares a 67 MB rANS output, within the 256 MiB per-block cap. Release decode takes about 0.2 s, so the fuzz build's 14 s is debug assertions. A limit across all blocks in one file is not yet implemented)_
 - [x] Memory-safety review of every remaining `unsafe` block _(one unsafe block in tpt-bio-seq mmap; MappedFile::open is now unsafe)_
 - [ ] Cross-platform test pass (Linux/macOS/Windows, x86_64 + aarch64) _(Windows x86_64 only tested locally; see docs/platforms.md)_
 - [x] `no_std` verification on an embedded target _(tpt-bio-core builds for thumbv7em-none-eabihf with --no-default-features)_
