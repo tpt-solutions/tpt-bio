@@ -5,7 +5,8 @@
 //! the block before the checksum.
 //!
 //! Methods: 0 raw, 1 gzip, 4 rANS 4x8 (orders 0 and 1), 5 rANS Nx16, 6 arithmetic,
-//! 8 TOK3 (read names, decode only). Methods 2 (bzip2) and 3 (LZMA) are reported as
+//! 8 TOK3 (read names, decode only). Method 2 (bzip2) is decoded by the pure-Rust
+//! decoder in `bzip2.rs`. Method 3 (LZMA) is reported as
 //! [`SeqError::Unsupported`]: no audited pure-Rust, permissively licensed
 //! implementation is in the workspace.
 
@@ -14,7 +15,7 @@ use std::io::{Read, Write};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 
 use crate::cram::bytes::{Cursor, crc32, put_itf8};
-use crate::cram::{arith, rans, rans_nx16, tok3};
+use crate::cram::{arith, bzip2, rans, rans_nx16, tok3};
 use crate::error::{Result, SeqError};
 
 const FORMAT: &str = "CRAM block";
@@ -26,7 +27,7 @@ pub enum Method {
     Raw,
     /// gzip (RFC 1952).
     Gzip,
-    /// bzip2. Not supported.
+    /// bzip2. Decoded by `bzip2.rs`; not written.
     Bzip2,
     /// LZMA. Not supported.
     Lzma,
@@ -97,7 +98,7 @@ pub struct Block {
 /// Decompresses a payload with the given method.
 ///
 /// # Errors
-/// Returns [`SeqError::Unsupported`] for bzip2 and LZMA, and
+/// Returns [`SeqError::Unsupported`] for LZMA, and
 /// [`SeqError::Malformed`] on corrupt data or a size mismatch.
 pub fn decompress(method: Method, payload: &[u8], raw_size: usize) -> Result<Vec<u8>> {
     // The size is untrusted: refuse impossible sizes before any buffer is reserved.
@@ -117,9 +118,7 @@ pub fn decompress(method: Method, payload: &[u8], raw_size: usize) -> Result<Vec
         Method::RansNx16 => rans_nx16::decode(payload, raw_size)?,
         Method::Tok3 => tok3::decode(payload, raw_size)?,
         Method::Arith => arith::decode(payload, raw_size)?,
-        Method::Bzip2 => {
-            return Err(SeqError::Unsupported("CRAM block method bzip2 (method 2)".into()));
-        }
+        Method::Bzip2 => bzip2::decompress(payload, raw_size)?,
         Method::Lzma => {
             return Err(SeqError::Unsupported("CRAM block method LZMA (method 3)".into()));
         }
@@ -248,15 +247,10 @@ mod tests {
     }
 
     #[test]
-    fn bzip2_block_is_unsupported() {
-        let mut buf = Vec::new();
-        write_block(Method::Raw, 0, 0, b"x", &mut buf).unwrap();
-        buf[0] = 2;
-        // Fix the CRC so the failure comes from the method, not the checksum.
-        let n = buf.len();
-        let sum = crc32(&buf[..n - 4]);
-        buf[n - 4..].copy_from_slice(&sum.to_le_bytes());
-        let err = read_block(&mut Cursor::new(&buf)).unwrap_err();
-        assert!(matches!(err, SeqError::Unsupported(_)));
+    fn bzip2_payload_decodes_to_its_declared_size() {
+        // one.bz2 is libbzip2's encoding of b"x".
+        let payload = include_bytes!("../../tests/fixtures/bzip2/one.bz2");
+        assert_eq!(decompress(Method::Bzip2, payload, 1).unwrap(), b"x");
+        assert!(matches!(decompress(Method::Bzip2, payload, 2), Err(SeqError::Malformed { .. })));
     }
 }

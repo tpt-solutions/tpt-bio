@@ -122,6 +122,7 @@ Rationale: Biological images are massive. Naive Rust loops are too slow; C++ rel
 ADR-003: WebGPU for 3D Cellular Volumes
 Decision: 3D rendering of cellular volumes will use wgpu (WebGPU), sharing the rendering paradigm established in tpt-vertex.
 Rationale: Allows biologists to view massive 3D cell models directly in the browser or via a lightweight Tauri desktop app. wgpu is MIT/Apache-2.0 compliant.
+Status (2026-11-25): the wgpu part is superseded. wgpu's own licence is fine, but its dependency tree (naga's codespan-reporting, glutin_wgl_sys) is Apache-2.0 only, which the MIT-only policy rejects. The browser path uses WebGPU through web-sys. The native path is a CPU reference renderer now, with a Vulkan backend (ash, offline SPIR-V) planned. See docs/dependency-audit.md.
 7. Data Flow Example: High-Content Phenotypic Screening
 Ingestion (tpt-bio-vision): Reads a 50GB OME-TIFF plate directly from cloud storage (S3) using memory-mapped I/O.
 Preprocessing (tpt-simd): Applies a 3D Gaussian blur and background subtraction using vectorized SIMD instructions.

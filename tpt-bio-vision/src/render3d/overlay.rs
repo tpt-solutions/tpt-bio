@@ -11,7 +11,7 @@
 //! always gets the same colour in every render.
 
 use super::camera::Camera;
-use super::raycast::{RenderSettings, check_inputs, finish, march, ortho_back};
+use super::raycast::{RenderSettings, check_inputs, finish, march, ortho_back, par_pixels};
 use super::transfer::TransferFunction;
 use super::volume::Volume;
 use super::{RenderError, Rgba8};
@@ -61,22 +61,19 @@ pub fn render_labelled(
     }
     let (w, h) = camera.viewport;
     let back = ortho_back(volume, camera);
-    let mut data = Vec::with_capacity(w * h);
-    for y in 0..h {
-        for x in 0..w {
-            let ray = camera.ray(x as f64 + 0.5, y as f64 + 0.5, back);
-            let m = march(volume, Some(labels), &ray, tf, settings.step);
-            let mut rgb = [0.0f32; 3];
-            let base = finish(m.colour, m.alpha, settings.background);
-            for (c, b) in rgb.iter_mut().zip(base) {
-                *c = f32::from(b) / 255.0;
-            }
-            if let Some(id) = m.first_label {
-                rgb = blend(rgb, label_colour(id), overlay.opacity);
-            }
-            data.push(quantise(rgb));
+    let data = par_pixels(w, h, |x, y| {
+        let ray = camera.ray(x as f64 + 0.5, y as f64 + 0.5, back);
+        let m = march(volume, Some(labels), &ray, tf, settings.step);
+        let mut rgb = [0.0f32; 3];
+        let base = finish(m.colour, m.alpha, settings.background);
+        for (c, b) in rgb.iter_mut().zip(base) {
+            *c = f32::from(b) / 255.0;
         }
-    }
+        if let Some(id) = m.first_label {
+            rgb = blend(rgb, label_colour(id), overlay.opacity);
+        }
+        quantise(rgb)
+    });
     Ok(Image::new_2d(w, h, data)?)
 }
 

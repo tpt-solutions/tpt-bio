@@ -8,6 +8,7 @@
 mod arith;
 pub mod block;
 pub mod bytes;
+mod bzip2;
 pub mod codec;
 pub mod compression;
 pub mod container;

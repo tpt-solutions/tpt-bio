@@ -9,9 +9,10 @@
 //! external (bzip2) codec, bit 3 a stripe of interleaved sub-streams, bit 4 means the
 //! original size is not stored, bit 5 a stored copy, bit 6 run-length coding and bit 7
 //! a bit-pack map. Unless bit 4 is set, a uint7 original size follows. Only the decode
-//! side is implemented. The bzip2 form and order 2 are reported as
+//! side is implemented. The bzip2 form is decoded by `bzip2.rs`. Order 2 is reported as
 //! [`SeqError::Unsupported`].
 
+use super::bzip2;
 use super::tok3::read_uint7;
 use crate::error::{Result, SeqError};
 
@@ -46,7 +47,7 @@ const MAX_SIZE: usize = i32::MAX as usize;
 /// capacity.
 ///
 /// # Errors
-/// Returns [`SeqError::Unsupported`] for the bzip2 and order-2 forms, and
+/// Returns [`SeqError::Unsupported`] for the order-2 form, and
 /// [`SeqError::Malformed`] for truncated or inconsistent data.
 pub(super) fn decode(input: &[u8], size: usize) -> Result<Vec<u8>> {
     uncompress(input, size)
@@ -101,9 +102,11 @@ fn uncompress(input: &[u8], capacity: usize) -> Result<Vec<u8>> {
         }
         rest[..packed_len].to_vec()
     } else if flags & X_EXT != 0 {
-        return Err(SeqError::Unsupported(
-            "TOK3 arithmetic streams with bzip2 (external) coding".into(),
-        ));
+        let bytes = bzip2::decompress(rest, packed_len)?;
+        if bytes.len() != packed_len {
+            return Err(malformed("bzip2 payload length differs from the declared size"));
+        }
+        bytes
     } else {
         match (flags & X_ORDER, flags & X_RLE != 0) {
             (0, false) => decode_order(rest, packed_len, false)?,
@@ -453,8 +456,15 @@ mod tests {
     }
 
     #[test]
-    fn bzip2_and_order_two_are_unsupported() {
-        assert!(matches!(decode(&[X_EXT, 0, 0], 0), Err(SeqError::Unsupported(_))));
+    fn external_bzip2_form_decodes() {
+        // The bzip2 payload follows the flag byte; the size is the capacity.
+        let mut data = vec![X_EXT | X_NOSZ];
+        data.extend_from_slice(include_bytes!("../../tests/fixtures/bzip2/one.bz2"));
+        assert_eq!(decode(&data, 1).unwrap(), b"x");
+    }
+
+    #[test]
+    fn order_two_is_unsupported() {
         assert!(matches!(decode(&[2, 0, 0], 0), Err(SeqError::Unsupported(_))));
     }
 

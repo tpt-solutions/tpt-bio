@@ -1,0 +1,56 @@
+# Builds the `tptbio` command-line binary for Linux, macOS (Intel and Apple silicon)
+# and Windows, and uploads each one as a workflow artifact.
+#
+# Manual dispatch only (workflow_dispatch). The binaries are artifacts and nothing else.
+#
+# PUBLISHING IS INTENTIONALLY ABSENT. There is no release, tag, crate publish or
+# package upload here. Adding one is a separate, deliberate decision.
+
+name: CLI binaries (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: tptbio (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            exe: tptbio
+          - os: macos-13
+            target: x86_64-apple-darwin
+            exe: tptbio
+          - os: macos-14
+            target: aarch64-apple-darwin
+            exe: tptbio
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            exe: tptbio.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build --release -p tpt-bio-cli --target ${{ matrix.target }}
+      - name: Smoke test
+        run: target/${{ matrix.target }}/release/${{ matrix.exe }} --version
+      - name: Upload binary as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tptbio-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/${{ matrix.exe }}
+          if-no-files-found: error
+          retention-days: 14

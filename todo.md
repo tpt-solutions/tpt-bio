@@ -48,7 +48,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 ### Dependency license audit
 - [x] Verify license expression of each planned dependency: tpt-math, tpt-simd, tpt-crypto, num-traits, flate2 (+ miniz_oxide), memmap2, rayon, crossbeam, image, tiff, ndarray, clap, pyo3, wgpu, ureq, serde/toml _(see docs/dependency-audit.md)_
 - [x] Reject or replace anything Apache-2.0-only, MPL, or copyleft (including transitive) _(arrow/parquet rejected; target-lexicon via pyo3 awaits a decision)_
-- [ ] Use `tpt-crypto` instead of `ring` for all crypto needs (SigV4 HMAC/SHA-256, HTTPS/TLS client, checksums); drop the `ring` clarify block from `deny.toml` _(SigV4 uses `tpt-crypto-hash`, pinned to a git commit; TLS is still open)_
+- [ ] Use `tpt-crypto` instead of `ring` for all crypto needs (SigV4 HMAC/SHA-256, HTTPS/TLS client, checksums); drop the `ring` clarify block from `deny.toml` _(SigV4 uses `tpt-crypto-hash`, pinned to a git commit; TLS is still open. 2026-11-26: `ring` is not in Cargo.lock, and `deny.toml` only keeps it as a ban. No clarify block is left to drop)_
 - [x] Verify tpt-crypto's license, `no_std` support and crates.io version; make sure the HTTP client's TLS stack can use it (or document the gap) _(MIT OR Apache-2.0, `tpt-crypto-hash` is `no_std`; not on crates.io, so it is pinned to a git commit; TLS not covered)_
 - [x] Record the audit result in `docs/dependency-audit.md`
 
@@ -125,8 +125,8 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 ### CLI (minimal) & milestone
 - [x] `tptbio seq view` (BAM/SAM, region, header-only, format output)
 - [x] `tptbio seq index`
-- [ ] Benchmark suite vs samtools (view, index, region query) on a human-genome-scale BAM _(synthetic 300,000-read BAM: view 304 ms vs samtools 298 ms, index 94 ms vs 273 ms, region 51 ms vs 14 ms; samtools' medians varied from 269 to 461 ms, and the environments differ (WSL vs native); no human genome data, so the milestone stays open; see docs/samtools-bcftools-conformance.md)_
-- [ ] **Milestone:** `tptbio seq view` reads and indexes a standard human genome BAM faster than samtools _(not measured; see benchmark item)_
+- [ ] Benchmark suite vs samtools (view, index, region query) on a human-genome-scale BAM _(synthetic 300,000-read BAM: view 304 ms vs samtools 298 ms, index 94 ms vs 273 ms, region 51 ms vs 14 ms; samtools' medians varied from 269 to 461 ms, and the environments differ (WSL vs native); no human genome data, so the milestone stays open; see docs/samtools-bcftools-conformance.md)_ 2026-11-26 update: run on a real human chromosome 20 BAM (318 MB, 2.9 M records, not genome-scale). Output matches samtools record for record. tptbio is faster for index (0.41x) and region query (0.16x) and slower for full view (1.39x). See docs/samtools-bcftools-conformance.md. The whole-genome BAM (15.6 GB) would take about 9.5 h at the measured 0.46 MB/s, so it is not run.
+- [ ] **Milestone:** `tptbio seq view` reads and indexes a standard human genome BAM faster than samtools _(not measured; see benchmark item)_ 2026-11-26: chr20 result is mixed (view slower, index and region faster). Still open until a whole-genome BAM is measured.
 
 ---
 
@@ -147,8 +147,8 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 ### CRAM / CRAI
 - [x] CRAM container and slice structure parser _(container, block framing and slice header; EOF marker is a self-consistent substitute, not the spec's)_
 - [x] CRAM header and compression header decoding _(compression header and encodings decoded; field layouts from memory, not verified against samtools)_
-- [ ] Core codecs: rANS 4x8, rANS Nx16, Huffman, beta, gamma, subexp, external _(all decode; rANS Nx16 order 1 and 32 states verified against samtools; RLE and STRIPE only from htscodecs-derived vectors; order 2 and bzip2 unsupported, as bzip2 needs a permissive decoder the workspace lacks)_
-- [x] Gzip, bzip2 and LZMA block compression _(gzip and rANS blocks done; bzip2 and LZMA return Unsupported, documented)_
+- [ ] Core codecs: rANS 4x8, rANS Nx16, Huffman, beta, gamma, subexp, external _(all decode; rANS Nx16 order 1 and 32 states verified against samtools; RLE and STRIPE only from htscodecs-derived vectors; bzip2 decoded since 2026-11-26 (pure Rust, `cram/bzip2.rs`, verified against samtools' bzip2 output). Still open: order 2, which samtools does not write)_
+- [x] Gzip, bzip2 and LZMA block compression _(gzip, rANS and bzip2 blocks decode. bzip2 decoded 2026-11-26 in pure Rust and checked against samtools 1.22 `use_bzip2=1` output. LZMA still returns Unsupported, documented)_
 - [x] Reference sequence handling (local FASTA + `.fai`, MD5 lookup) _(FASTA reference with MD5 region check; in-memory FASTA also accepted)_
 - [x] Reference-free / embedded reference mode _(reads needing copied bases return Unsupported; unknown-bases flag not handled)_
 - [x] Record decoding (read features -> alignment records) _(all standard read features except RG; spec bit meanings not checked against samtools)_
@@ -196,7 +196,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Median / mean filters
 - [x] Edge detection (Sobel, Scharr, Canny) _(Canny has no built-in smoothing)_
 - [x] Morphology (erode, dilate, open, close, top-hat) in 2D/3D
-- [ ] Runtime feature detection (AVX2 / AVX-512 / NEON) with scalar fallback _(reopened 2026-11-25. `tpt-simd` chooses its vector kernels at compile time, from target features, so runtime detection does not change the kernels. `simd::backend()` now reports the compiled kernels, and `detected_features()` reports the CPU. The default build stays baseline x86_64 for portability. Still open: true runtime dispatch, which needs a change in tpt-simd or per-ISA builds)_
+- [ ] Runtime feature detection (AVX2 / AVX-512 / NEON) with scalar fallback _(decided 2026-11-26: deferred past v0.1.0. Runtime dispatch needs `#[target_feature]` functions, which are `unsafe` and clash with `tpt-bio-vision`'s `forbid(unsafe_code)`. Per-ISA builds are the supported route. Reopened 2026-11-25. `tpt-simd` chooses its vector kernels at compile time, from target features, so runtime detection does not change the kernels. `simd::backend()` now reports the compiled kernels, and `detected_features()` reports the CPU. The default build stays baseline x86_64 for portability. Still open: true runtime dispatch, which needs a change in tpt-simd or per-ISA builds)_
 - [ ] Benchmarks vs scalar baseline and reference implementations _(`examples/simd_bench.rs`, a 2048x2048 separable Gaussian blur, sigma 2, median of 7. Baseline build: about 117 ms. Built with `RUSTFLAGS="-C target-feature=+avx,+fma"`: about 22 ms, roughly 5 times faster. Still open: a reference implementation to compare against, and the other filters)_
 
 ### Segmentation
@@ -235,19 +235,19 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Clustering (k-means, hierarchical, optionally UMAP/t-SNE if feasible) _(k-means, agglomerative, t-SNE and UMAP; simplified and unverified against references)_
 - [x] Phenotype grouping and per-well aggregation _(grouping and mean/median aggregation; no threshold classifier, since none was specified)_
 - [x] Quality metrics (Z-prime, SSMD) _(`stats::qc`)_
-- [ ] Tests vs scikit-learn reference results _(BLOCKED: scikit-learn not available)_
+- [x] Tests vs scikit-learn reference results _(2026-11-26, scikit-learn 1.9.0 now installed. `tpt-bio-core/tests/sklearn_reference.rs` checks z-score, robust scaling, PCA (mean, variance, ratio, axes up to sign, scores) and k-means (partition and inertia) to 1e-9. The generator is `tpt-bio-core/tests/fixtures/sklearn/generate.py`. Not covered: t-SNE, UMAP, agglomerative clustering and the QC metrics)_
 
 ### 3D viewer (ADR-003, wgpu superseded)
 - [x] Architecture note: share the rendering paradigm with tpt-vertex _(docs/architecture-3d-viewer.md; tpt-vertex not available, so the comparison is unverified)_
 - [x] ~~wgpu volume renderer~~ _(wgpu rejected by the licence policy, see the open decisions. Closed as won't-do. The WGSL shader is `tpt-bio-vision/src/render3d/raycast.wgsl`, used by the browser path, and the retired wgpu host code is in `gpu-draft/wgpu_host.rs.txt`)_
 - [x] Native render backend seam _(`render3d::backend`: `RenderBackend` trait, `CpuBackend`. `render_volume` and `render_labelled` now run rows in parallel with rayon, output identical to the serial reference)_
 - [x] Licence audit of native GPU candidates _(2026-11-25, docs/dependency-audit.md: `ash` 0.38 + `libloading` pass; `wry` fails on `dpi` (Apache-2.0 AND MIT) and `dunce` (MIT-0 not allowed) and has a `*-sys` crate)_
-- [ ] Native Vulkan backend: `ash` + offline-compiled SPIR-V ray caster implementing `RenderBackend` _(chosen 2026-11-25. Needs a decision on run-time Vulkan loading (`libloading`) against the zero-FFI rule. Port `raycast.wgsl` to SPIR-V offline and commit the `.spv`. Check output against `CpuBackend`. Windows and Linux; Metal is separate)_
+- [ ] Native Vulkan backend: `ash` + offline-compiled SPIR-V ray caster implementing `RenderBackend` _(chosen 2026-11-25. Decided 2026-11-26: `libloading` is accepted. It is dlopen of the system loader, not a `-sys` crate, so it passes the zero-FFI CI rule. The backend goes in a new opt-in crate, `tpt-bio-vulkan`, because `tpt-bio-vision` forbids unsafe code. BLOCKED 2026-11-26: no WGSL-to-SPIR-V compiler is installed, and installing naga-cli was denied. Next step: provide `glslc`, `naga` or a Vulkan SDK, or commit the `.spv` built elsewhere. Then the shared CPU-side prep (rays, LUT, packing) moves out of `webgpu.rs`, and the backend is checked against `CpuBackend` on the Intel GPU here. Windows and Linux; Metal is separate)_
 - [x] Label/mask overlay and per-cell coloring _(CPU renderer, first-hit blending)_
 - [x] Mesh / isosurface rendering of segmented cells _(marching tetrahedra and a flat-shaded CPU rasteriser)_
 - [x] Large-volume handling (chunked/streamed, level of detail) _(block-max LOD with the usual rule: coarsest level whose voxels cover at most N pixels. `render3d::stream` builds levels from a `SlabSource` one z-slab at a time, equal to the in-memory result. `stream_level_for_camera` streams only the level the camera needs. `OmeSlabs` is a file-backed source over OME-TIFF planes, verified on single- and multi-channel files. `ZarrSlabs` reads `[z, y, x]` and `[c, z, y, x]` Zarr arrays through the new `ZarrArray::read_block`, which fetches only the chunks a slab overlaps; a test counts the chunk reads. The interactive viewer is not built, as with the camera controls item)_
-- [ ] Browser target (WASM + WebGPU) demo _(built: `tpt-bio-web` compiles for wasm32, `tpt-bio-vision` feature `webgpu` uses `web-sys` WebGPU with the same shader and packing as the CPU reference, and `wasm-bindgen` 0.2.130 generated the bindings. NOT yet run in a browser: the page needs an HTTP server, and starting one was denied, so the GPU output is unverified. Next step: serve `tpt-bio-web/www` and check `run_comparison` reports PASS in Chrome)_
-- [ ] Optional Tauri desktop app (license check for Tauri and its dependency tree)
+- [ ] Browser target (WASM + WebGPU) demo _(2026-11-26: the page loads over HTTP and the WASM module is fetched, but headless Edge reports `requestAdapter returned null`, with and without WebGPU flags and SwiftShader. Still unverified, so it needs a machine with a WebGPU adapter. Earlier notes: built: `tpt-bio-web` compiles for wasm32, `tpt-bio-vision` feature `webgpu` uses `web-sys` WebGPU with the same shader and packing as the CPU reference, and `wasm-bindgen` 0.2.130 generated the bindings. NOT yet run in a browser: the page needs an HTTP server, and starting one was denied, so the GPU output is unverified. Next step: serve `tpt-bio-web/www` and check `run_comparison` reports PASS in Chrome)_
+- [x] ~~Optional Tauri desktop app~~ _(won't do, decided 2026-11-26: Tauri depends on `wry`, which failed the licence audit on `dpi`, `dunce` and a `*-sys` crate. See docs/dependency-audit.md)_
 - [x] Camera controls, channel and clipping controls _(library API only; no interactive UI)_
 - [x] Viewer documentation and sample dataset _(docs/viewer.md and a sample-volume generator example)_
 
@@ -272,7 +272,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [ ] Consistent output formats, exit codes, logging/verbosity _(exit codes 0/1/2 are documented in the CLI README and tested; `seq export` now renders `table` as aligned columns, as the other row commands do; logging is still limited to -q/-v and log levels in the config file)_
 - [x] Config file support _(tptbio.toml with threads (recorded only), log_level, output_format)_
 - [x] CLI integration tests _(integration tests run against the built binary)_
-- [ ] Prebuilt binaries via CI (Linux/macOS/Windows) _(not done for the CLI; wheels.yml exists for Python only and has not run)_
+- [x] Prebuilt binaries via CI (Linux/macOS/Windows) _(2026-11-26: `.github/workflows/cli-binaries.yml` builds `tptbio` for x86_64 Linux, x86_64 and aarch64 macOS, and x86_64 Windows, on manual dispatch. It uploads workflow artifacts only, with no release. Not yet run on GitHub. Replayed locally on Windows: release build, and `tptbio --version` prints `tptbio 0.1.0`)_
 
 ### tpt-bio-py (PyO3 + maturin)
 - [x] Bindings for seq readers (iterators, region queries) _(FASTQ iterator and BAM region queries)_
@@ -296,11 +296,11 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Performance regression checks in CI _(.github/workflows/perf.yml runs weekly and on demand, informational only; not run on GitHub)_
 - [x] Extended fuzzing run, fix findings _(2026-11-25, nightly cargo-fuzz in WSL: each of the ten parser targets ran for about 500 s, bgzf_decompress 500 s twice. One real bug found and fixed: a BGZF block whose BSIZE was smaller than its header and footer panicked (c338925). Every saved artifact now replays cleanly. Open: a 42-byte CRAM input declares a 67 MB rANS output, within the 256 MiB per-block cap. Release decode takes about 0.2 s, so the fuzz build's 14 s is debug assertions. A limit across all blocks in one file is not yet implemented)_
 - [x] Memory-safety review of every remaining `unsafe` block _(one unsafe block in tpt-bio-seq mmap; MappedFile::open is now unsafe)_
-- [ ] Cross-platform test pass (Linux/macOS/Windows, x86_64 + aarch64) _(Windows x86_64 passes locally. Linux x86_64 in WSL passed the full default-member workspace test run, 23 suites, 2026-11-25, with a separate target directory. macOS and aarch64 are not run)_
+- [ ] Cross-platform test pass (Linux/macOS/Windows, x86_64 + aarch64) _(Windows x86_64 passes locally, and `cargo test --workspace` passes with `-D warnings` on 2026-11-26. Linux x86_64 in WSL passed the full default-member workspace test run, 23 suites, 2026-11-25, with a separate target directory. ci.yml's test matrix (ubuntu, macos, windows) and the aarch64-macOS build in cli-binaries.yml exist but have not run on GitHub. macOS and aarch64 are not run here)_
 - [x] `no_std` verification on an embedded target _(tpt-bio-core builds for thumbv7em-none-eabihf with --no-default-features)_
 
 ### License & compliance (final)
-- [ ] Full `cargo deny check` clean on the release commit _(passes on the current working tree, 2026-11-25: advisories, bans, licences and sources all ok; criterion, which brought in Apache-only ciborium, is removed; a stale borsh-derive entry remains in Cargo.lock but is not in the build graph; still to re-run on the actual release commit, which does not exist yet)_
+- [ ] Full `cargo deny check` clean on the release commit _(2026-11-26: `cargo deny check` passes on the working tree, with advisories, bans, licences and sources all ok. The release commit still does not exist, so this stays open)_
 - [x] Regenerate `docs/dependency-audit.md` and a third-party notices file _(THIRD_PARTY.md generated from cargo metadata, 214 packages; docs/dependency-audit.md updated)_
 - [x] Confirm zero-FFI: no `-sys` crates in the dependency tree (`cargo tree` check in CI) _(only windows-sys among -sys crates; pyo3-ffi only in the bindings, which CI now excludes on purpose; docs/zero-ffi.md)_
 - [x] Confirm headers/Cargo metadata/LICENSE files consistent in all crates and in the Python package _(READMEs and readme keys are consistent; `LICENSE-MIT` and `LICENSE-APACHE` copied byte-identical into each library and CLI crate and into `bindings/tpt-bio-py`; crates inherit `license` from the workspace)_

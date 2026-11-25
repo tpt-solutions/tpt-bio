@@ -32,6 +32,11 @@ flate2.workspace = true
 [lints]
 workspace = true
 
+# The CPU renderer runs rows in parallel. The browser build is single-threaded, so it
+# keeps the serial loop.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon.workspace = true
+
 # Browser-only dependencies, used by the `webgpu` feature.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = { workspace = true, optional = true }

@@ -1247,6 +1247,7 @@ dependencies = [
  "js-sys",
  "ndarray",
  "quick-xml",
+ "rayon",
  "serde",
  "serde_json",
  "tiff 0.9.1",

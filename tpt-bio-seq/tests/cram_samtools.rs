@@ -161,7 +161,7 @@ fn decodes_samtools_cram_31_tok3_names_to_samtools_records() {
 }
 
 /// Decodes a TOK3 fixture and checks its records against samtools' own projected decode.
-fn assert_tok3_fixture_matches(cram: &str, expected: &str) {
+fn assert_fixture_matches(cram: &str, expected: &str) {
     let reference = CramReference::from_path(fixture("ref.fa")).unwrap();
     let file = BufReader::new(File::open(fixture(cram)).unwrap());
     let mut reader = CramReader::with_reference(file, reference).unwrap();
@@ -181,9 +181,16 @@ fn assert_tok3_fixture_matches(cram: &str, expected: &str) {
 }
 
 #[test]
+fn decodes_samtools_cram_31_with_bzip2_blocks() {
+    // Written with `--output-fmt-option use_bzip2=1`; the file holds BZh streams, which
+    // are decoded by the bzip2 decoder. Same 250 alignments as the base fixture.
+    assert_fixture_matches("samtools_v31_bzip2.cram", "expected_records.txt");
+}
+
+#[test]
 fn decodes_samtools_cram_31_tok3_illumina_old_names() {
     // `HWI-ST123:4:1101:1234:5678`-style names; same 250 alignments as the base TOK3 fixture.
-    assert_tok3_fixture_matches(
+    assert_fixture_matches(
         "samtools_v31_tok3_illum_old.cram",
         "expected_tok3_illum_old_records.txt",
     );
@@ -192,7 +199,7 @@ fn decodes_samtools_cram_31_tok3_illumina_old_names() {
 #[test]
 fn decodes_samtools_cram_31_tok3_illumina_new_names() {
     // `A00123:45:HXXXXDSXX:1:1101:12345:1000`-style names.
-    assert_tok3_fixture_matches(
+    assert_fixture_matches(
         "samtools_v31_tok3_illum_new.cram",
         "expected_tok3_illum_new_records.txt",
     );
@@ -201,25 +208,19 @@ fn decodes_samtools_cram_31_tok3_illumina_new_names() {
 #[test]
 fn decodes_samtools_cram_31_tok3_sra_names() {
     // `SRR1234567.1234` names with increasing numbers.
-    assert_tok3_fixture_matches("samtools_v31_tok3_sra.cram", "expected_tok3_sra_records.txt");
+    assert_fixture_matches("samtools_v31_tok3_sra.cram", "expected_tok3_sra_records.txt");
 }
 
 #[test]
 fn decodes_samtools_cram_31_tok3_sra_mate_names() {
     // `SRR1234567.1234 1234/1` names: mates share a base number and differ in the suffix.
-    assert_tok3_fixture_matches(
-        "samtools_v31_tok3_sra_mate.cram",
-        "expected_tok3_sra_mate_records.txt",
-    );
+    assert_fixture_matches("samtools_v31_tok3_sra_mate.cram", "expected_tok3_sra_mate_records.txt");
 }
 
 #[test]
 fn decodes_samtools_cram_31_tok3_numeric_names() {
     // Purely numeric names `1`, `2`, ...
-    assert_tok3_fixture_matches(
-        "samtools_v31_tok3_numeric.cram",
-        "expected_tok3_numeric_records.txt",
-    );
+    assert_fixture_matches("samtools_v31_tok3_numeric.cram", "expected_tok3_numeric_records.txt");
 }
 
 #[test]
@@ -228,7 +229,7 @@ fn decodes_samtools_cram_31_tok3_duplicate_and_zero_delta_names() {
     // `pair:0002` twice, ...). The zero-padded counter steps by one per pair. samtools
     // stores the names with TOK3 and they use the DUP (whole-name repeat), DDELTA0
     // (zero-padded numeric delta) and MATCH token types.
-    assert_tok3_fixture_matches("samtools_v31_tok3_dup.cram", "expected_tok3_dup_records.txt");
+    assert_fixture_matches("samtools_v31_tok3_dup.cram", "expected_tok3_dup_records.txt");
 }
 
 #[test]
@@ -236,5 +237,5 @@ fn decodes_samtools_cram_31_arithmetic_tok3_names() {
     // Written by `samtools view -C -T ref.fa --output-fmt-option version=3.1 --output-fmt-option
     // use_arith=1 names_illum.sam` (same names as the base TOK3 fixture). The name blocks are
     // TOK3 with the arithmetic flag set, and the data series are arithmetic blocks (method 6).
-    assert_tok3_fixture_matches("samtools_v31_tok3_arith.cram", "expected_tok3_arith_records.txt");
+    assert_fixture_matches("samtools_v31_tok3_arith.cram", "expected_tok3_arith_records.txt");
 }

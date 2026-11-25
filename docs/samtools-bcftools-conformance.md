@@ -88,3 +88,31 @@ in batches (read-ahead starts at 64 KiB after each seek, and grows to 4 MiB).
 
 Our records and region results were checked against samtools on the same file. Human
 genome data was not available, so the milestone for a human-genome BAM remains open.
+
+## Human BAM benchmark (chromosome 20, 2026-11-26)
+
+Input: `HG00096.chrom20.ILLUMINA.bwa.GBR.low_coverage.20120522.bam` from the 1000 Genomes
+phase 3 FTP (318,238,352 bytes, 2,931,500 records). This is real human chromosome 20, not
+the whole genome. The whole-genome BAM for the same sample is 15.6 GB, and the link measured
+about 0.46 MB/s, so it was not downloaded.
+
+One block in the first download was damaged in transit. `tptbio` rejected it with an ISIZE
+mismatch, and samtools failed to inflate it too. The block was re-fetched from the server,
+and all 16,284 BGZF blocks then pass their CRC and length checks.
+
+Environments differ. tptbio is a release build on native Windows, reading the file from NTFS.
+samtools 1.22.1 runs in WSL Ubuntu and reads a copy on the Linux filesystem. Each operation
+ran five times, and the median is shown.
+
+| Operation | tptbio | samtools | tptbio / samtools |
+|---|---|---|---|
+| view (full file, SAM text to null) | 4.438 s (4.390-4.521) | 3.190 s (3.108-4.355) | 1.39 |
+| index (BAI) | 0.965 s (0.920-1.001) | 2.360 s (1.728-2.389) | 0.41 |
+| region `20:10000000-10100000` | 0.355 s (0.340-0.397) | 2.156 s (2.001-2.195) | 0.16 |
+
+The region timings include WSL start-up for samtools. Output agreement, with header lines
+excluded: the full view has 2,931,500 records with the same SHA-256 from both tools, and the
+region has 4,813 records with the same SHA-256.
+
+So tptbio builds an index faster and answers region queries faster than samtools here, but
+full-file SAM output is slower. The genome-scale milestone is still open.

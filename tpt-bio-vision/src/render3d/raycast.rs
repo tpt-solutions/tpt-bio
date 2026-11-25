@@ -50,15 +50,45 @@ pub fn render_volume(
     check_inputs(volume, camera, tf, settings)?;
     let (w, h) = camera.viewport;
     let back = ortho_back(volume, camera);
-    let mut data = Vec::with_capacity(w * h);
-    for y in 0..h {
-        for x in 0..w {
-            let ray = camera.ray(x as f64 + 0.5, y as f64 + 0.5, back);
-            let m = march(volume, None, &ray, tf, settings.step);
-            data.push(finish(m.colour, m.alpha, settings.background));
-        }
-    }
+    let data = par_pixels(w, h, |x, y| {
+        let ray = camera.ray(x as f64 + 0.5, y as f64 + 0.5, back);
+        let m = march(volume, None, &ray, tf, settings.step);
+        finish(m.colour, m.alpha, settings.background)
+    });
     Ok(Image::new_2d(w, h, data)?)
+}
+
+/// Evaluates `pixel(x, y)` for every pixel of a `w` by `h` viewport, in row-major order.
+///
+/// Rows run in parallel on native targets and serially on wasm32. Each pixel depends only
+/// on its own coordinates, so the output is the same for any thread count.
+pub(super) fn par_pixels<F>(w: usize, h: usize, pixel: F) -> Vec<Rgba8>
+where
+    F: Fn(usize, usize) -> Rgba8 + Sync,
+{
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        let mut data = vec![[0u8; 4]; w * h];
+        if w > 0 {
+            data.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+                for (x, p) in row.iter_mut().enumerate() {
+                    *p = pixel(x, y);
+                }
+            });
+        }
+        data
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut data = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                data.push(pixel(x, y));
+            }
+        }
+        data
+    }
 }
 
 /// Validates the inputs shared by every render entry point.
@@ -267,6 +297,43 @@ mod tests {
         tf.clip = Some(ClipPlane { normal: [1.0, 0.0, 0.0], offset: -25.0 });
         let none = render_volume(&vol, &cam, &tf, &settings).unwrap();
         assert_eq!(none.get(40, 40, 0).unwrap(), &[0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn render3d_raycast_parallel_matches_serial_reference() {
+        // A non-square viewport and a rotated camera, so rows differ and no row is special.
+        let mut vol_data = Vec::new();
+        for z in 0..12 {
+            for y in 0..12 {
+                for x in 0..12 {
+                    vol_data.push(((x * 7 + y * 3 + z * 5) % 11) as f32 / 10.0);
+                }
+            }
+        }
+        let img = Image::new_3d(12, 12, 12, vol_data).unwrap();
+        let vol = Volume::new(vec![img], [1.0, 1.0, 1.5]).unwrap();
+        let mut ch = ChannelTransfer::new([0.9, 0.4, 0.1], (0.0, 1.0));
+        ch.opacity = vec![(0.0, 0.0), (1.0, 0.3)];
+        let tf = TransferFunction { channels: vec![ch], clip: None };
+        let mut cam = ortho(0.7, 0.4, 24.0, (37, 23));
+        cam.target = [6.0, 6.0, 9.0];
+        let settings = RenderSettings { step: 0.4, background: [10, 20, 30] };
+
+        let got = render_volume(&vol, &cam, &tf, &settings).unwrap();
+
+        let (w, h) = cam.viewport;
+        let back = ortho_back(&vol, &cam);
+        let mut want = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                let ray = cam.ray(x as f64 + 0.5, y as f64 + 0.5, back);
+                let m = march(&vol, None, &ray, &tf, settings.step);
+                want.push(finish(m.colour, m.alpha, settings.background));
+            }
+        }
+        assert_eq!(got.data(), want.as_slice());
+        // The scene is not trivially one colour.
+        assert!(got.data().iter().any(|p| *p != got.data()[0]));
     }
 
     #[test]

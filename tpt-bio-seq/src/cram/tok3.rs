@@ -45,7 +45,7 @@ const N_END: u8 = 12;
 /// declared length.
 ///
 /// # Errors
-/// Returns [`SeqError::Unsupported`] for the bzip2 and order-2 forms of the
+/// Returns [`SeqError::Unsupported`] for the order-2 forms of the
 /// arithmetic streams, and [`SeqError::Malformed`] for truncated or inconsistent data.
 pub fn decode(blob: &[u8], raw_size: usize) -> Result<Vec<u8>> {
     if blob.len() < HEADER_LEN {

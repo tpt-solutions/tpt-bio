@@ -3,6 +3,7 @@
 //! This is the foundation for the Phase 4 3D viewer. Everything here runs on the CPU and
 //! renders to plain RGBA buffers. No GPU, windowing or interactive code exists yet.
 //!
+//! - [`backend`]: the [`backend::RenderBackend`] trait and the CPU implementation.
 //! - [`volume`]: multi-channel volumes with physical voxel spacing and trilinear sampling.
 //! - [`camera`]: orbit camera with perspective or orthographic projection.
 //! - [`transfer`]: per-channel windowed transfer functions and a clipping plane.
@@ -10,10 +11,11 @@
 //! - [`overlay`]: label overlay with first-hit surface blending and a deterministic palette.
 //! - [`isosurface`]: marching-tetrahedra isosurfaces producing a triangle [`isosurface::Mesh`].
 //! - [`lod`]: block-max downsampling and screen-footprint level selection.
-//! - [`webgpu`] (feature `webgpu`, wasm32): the same marching through the browser's WebGPU.
+//! - `webgpu` (feature `webgpu`, wasm32): the same marching through the browser's WebGPU.
 //! - [`stream`]: block-max levels streamed from a [`stream::SlabSource`], one z-slab at a time.
 //! - [`rasterise`]: flat-shaded z-buffer rasteriser for isosurface meshes.
 
+pub mod backend;
 pub mod camera;
 pub mod isosurface;
 pub mod lod;

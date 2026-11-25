@@ -14,11 +14,13 @@ statement about it is an open question.
 ## The tpt-bio side
 
 ADR-003 says 3D rendering will use wgpu (WebGPU) and share the paradigm of `tpt-vertex`.
-Today the repository has the following, and nothing else:
+wgpu has since been rejected by the licence policy (`docs/dependency-audit.md`), and the
+ADR carries a note saying so. Today the repository has the following, and nothing else:
 
-- **No GPU dependency.** `wgpu` is not in any `Cargo.toml`. `docs/dependency-audit.md`
-  lists it as planned for Phase 4 at version 26.0.1, with a note to check the MSRV
-  before upgrading.
+- **No native GPU dependency.** `wgpu` is not in any `Cargo.toml` and will not be. The
+  browser path uses `web-sys` WebGPU (feature `webgpu`, wasm32 only). The planned native
+  backend is Vulkan through `ash` with an offline-compiled SPIR-V shader, which passed the
+  licence audit. It is not started.
 - **A CPU reference renderer** in `tpt-bio-vision::render3d` (see `docs/viewer.md`).
   Its public types are the boundary that any GPU path would have to meet:
 
@@ -71,5 +73,6 @@ tolerance.
     physical units.
 
 Until these are answered, the tpt-bio work does not depend on tpt-vertex. The CPU
-renderer and its public types stay as they are, and a GPU path can be added behind
-them later.
+renderer and its public types stay as they are. A native GPU path is added behind the
+`RenderBackend` trait in `render3d::backend`, whose only implementation today is
+`CpuBackend`.

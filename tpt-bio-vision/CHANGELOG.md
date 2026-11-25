@@ -25,6 +25,13 @@ All notable changes to `tpt-bio-vision` are recorded here. The format follows
 - AWS Signature Version 4 request signing.
 - CPU reference 3D renderer: camera, transfer functions, ray casting, label
   overlay, marching-tetrahedra isosurfaces, level of detail and mesh rasterising.
+- `render3d::backend`: the `RenderBackend` trait and `CpuBackend`, the seam for a
+  future native GPU renderer.
+
+### Changed
+
+- `render_volume` and `render_labelled` run rows in parallel with rayon on native
+  targets. Output is unchanged. The wasm32 build keeps the serial loop.
 
 ## [0.1.0]
 

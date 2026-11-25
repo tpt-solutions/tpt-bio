@@ -56,7 +56,11 @@ tptbio seq view reads.bam -r chr1:1000-2000   # region query (1-based, inclusive
 
 ## Not implemented
 
-- A GPU (wgpu) viewer, a WebAssembly or WebGPU build, and a desktop app (spec ADR-003).
+- A native GPU renderer and a desktop app. wgpu was rejected by the licence policy
+  ([docs/dependency-audit.md](docs/dependency-audit.md)). The planned native backend is Vulkan
+  through `ash` with an offline-compiled SPIR-V shader, behind the `RenderBackend` trait. The
+  CPU renderer is the only native renderer today.
+- Browser WebGPU is built (`tpt-bio-web`) but its GPU output has not been run in a browser yet.
 - Conformance tests against samtools, bcftools, scikit-learn or CellProfiler, and
   benchmarks against samtools.
 - Parquet. It needs Arrow, which is excluded by the licence policy.

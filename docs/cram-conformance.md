@@ -20,6 +20,7 @@ This records how the CRAM reader and writer were checked against samtools 1.22.1
 | We decode a samtools CRAM 3.1 file whose TOK3 names use the arithmetic flag (flag 1) | Yes. `samtools_v31_tok3_arith.cram`, written with `--output-fmt-option use_arith=1`. 250 records; the projected, sorted records equal samtools' own decode. The two name blocks have flag 1. The 23 external data-series blocks are method 6 (arithmetic) and decode as well. |
 | Arithmetic coder (htscodecs `arith_dynamic.c`) for TOK3 streams and block method 6 | Ported in `tpt-bio-seq/src/cram/arith.rs`: order 0 and 1 models, run-length, bit-packing, stored, and striped streams. Checked end to end by the arithmetic fixture, which uses order 0 and 1, packed and packed run-length streams, stored streams, and striped streams. Unit tests cover packing, striping, stored streams and truncation. |
 | Block level: every rANS Nx16 block of four samtools files | Yes. 156 payloads. Our output is byte-identical to the libhtscodecs decode that samtools uses. |
+| We decode a samtools CRAM 3.1 file whose blocks are bzip2 (method 2) | Yes. `samtools_v31_bzip2.cram`, written with `--output-fmt-option use_bzip2=1`. 250 records, identical to samtools in every column and tag. The file holds bzip2 streams. The decoder is in `tpt-bio-seq/src/cram/bzip2.rs`, checked on libbzip2 fixtures (multi-block, concatenated, corrupt and truncated input) in `tests/fixtures/bzip2`. |
 | `cargo fuzz run cram_read` for 60 seconds | Ran with no crash (8606 runs). |
 
 ## Transforms samtools produced
@@ -53,9 +54,9 @@ only with streams from the htscodecs encoder (see the unit tests below).
   against streams that the htscodecs library produced (unit tests).
 - **Writing CRAM 3.1 and writing order 1 or N32**: our writer produces 3.0 only. There is no
   order-1 or N32 encoder in the crate.
-- **Arithmetic streams with bzip2 (external) coding or order 2**: reported as `Unsupported`.
-  samtools does not write order 2, and the bzip2 form would need a bzip2 decoder, which the
-  workspace does not have. Plain run-length without packing, unpacked stripes and the
+- **Arithmetic streams with order 2**: reported as `Unsupported`. samtools does not write
+  order 2. The bzip2 (external) form of arithmetic streams is decoded, but only checked against
+  libbzip2 fixtures, not a samtools file. Plain run-length without packing, unpacked stripes and the
   no-size flag are ported but not covered by a samtools fixture.
 - **The `archive` profile** (`-O cram,version=3.1,archive`) wrote the same block methods as
   `use_arith=1` for this file (2 flag-1 name blocks, 23 method 6 blocks). Its decode also matches

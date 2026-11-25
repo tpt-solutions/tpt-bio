@@ -42,6 +42,9 @@ to a commit.
 | `ndarray` | 0.17.2 | MIT OR Apache-2.0 | Planned. |
 | `numpy` (rust-numpy) | 0.30.0 | BSD-2-Clause | Planned (Python interop). |
 | `wgpu` | 26.0.1 | MIT OR Apache-2.0 | **Rejected.** Its tree includes `codespan-reporting` (Apache-2.0 only, a non-optional dependency of naga), `gl_generator`, `glutin_wgl_sys` (Apache-2.0 only), `hexf-parse` (CC0-1.0) and `paste` (RUSTSEC-2024-0436). No feature selection removes them. Browser WebGPU will use `web-sys` instead. |
+| `ash` | 0.38.0+1.3.281 | MIT OR Apache-2.0 | **Passes** (audited 2026-11-25, see "Native GPU candidates"). Not yet used. Candidate Vulkan backend for `render3d`, fed offline-compiled SPIR-V. |
+| `libloading` | 0.8.9 | ISC | **Passes.** Only dependency of `ash` besides `windows-link`. It loads `vulkan-1.dll` at run time, so it is FFI in the dlopen sense (see the zero-FFI note below). **Decided 2026-11-26: accepted.** It is not a `-sys` crate, so the zero-FFI CI rule holds. |
+| `wry` | 0.57.3 | Apache-2.0 OR MIT | **Fails the policy on Windows** (audited 2026-11-25). `dpi` and `dunce` are rejected. Not used. See "Native GPU candidates". |
 | `ureq` | 3.5.2 | MIT OR Apache-2.0 | Planned, HTTP range reads. Its TLS stack still needs a decision (see below). |
 | `serde`, `toml` | 1.0.229, 1.2.2 | MIT OR Apache-2.0 | Planned, pipeline definitions. |
 | `tpt-benchmark` (git) | 0.1.0 | MIT OR Apache-2.0 | **Adopted**, dev-dependency for benchmarks (`tpt-bio-seq`). Replaced `criterion`. Pinned to `8384f44` of `tpt-solutions/tpt-benchmark`, which is not yet on crates.io. |
@@ -64,6 +67,42 @@ to a commit.
 | `arrow`, `parquet` (and `tpt-strata-parquet`, which depends on them) | Apache-2.0 only, and Parquet is out of scope | `tpt-strata` for in-process tables. Tabular export is CSV (`tptbio seq export --format csv`) and JSON Lines (`--format jsonl`). |
 | `target-lexicon` (upstream) | `Apache-2.0 WITH LLVM-exception` | `target-lexicon-mit` via `[patch.crates-io]`. |
 | `ring`, any `*-sys` crate | Zero-FFI policy | `tpt-crypto`. `windows-sys` is excluded from the check because it is Microsoft's OS binding, not a third-party C library. |
+
+## Native GPU candidates (2026-11-25)
+
+wgpu was rejected (above), so native GPU rendering has no backend. Two replacements were
+audited in scratch projects outside the repo, with this repository's `deny.toml` (`all-features`
+off) and `cargo deny --target x86_64-pc-windows-msvc check licenses bans advisories`.
+
+| Candidate | Packages (Windows) | licenses | bans | advisories |
+| --- | --- | --- | --- | --- |
+| `ash` 0.38.0 | 3: `ash`, `libloading` 0.8.9 (ISC), `windows-link` 0.2.1 | ok | ok | ok |
+| `wry` 0.57.3 (webview shell) | 38 | **FAILED** | ok | ok |
+
+`wry` failures, both transitive:
+
+- `dpi` 0.1.2 is `Apache-2.0 AND MIT`. The `AND` needs Apache-2.0, which the policy rejects.
+  This one is a real conflict and no `deny.toml` setting fixes it short of allowing Apache-2.0.
+- `dunce` 1.0.5 is `CC0-1.0 OR MIT-0 OR Apache-2.0`. MIT-0 is permissive and MIT-compatible but
+  is not on the allow list. Adding `MIT-0` to `[licenses] allow` would clear it.
+
+Other points for `wry`:
+
+- `webview2-com-sys` is a `*-sys` crate. The zero-FFI rule excepts only `windows-sys`, so this
+  needs an explicit exception or a decision.
+- Only the Windows target was checked. macOS and Linux pull in other webview stacks (WebKit,
+  GTK) that were not audited.
+
+Points for `ash`:
+
+- Every package passes with no policy change.
+- Vulkan is loaded with `libloading` at run time, so this is FFI. It is not a `*-sys` crate and
+  no `deny.toml` ban matches it, but it is a departure from the zero-FFI intent. Needs an
+  explicit decision before adoption.
+- `ash` takes SPIR-V only. WGSL would be compiled offline (outside the dependency tree) and the
+  `.spv` committed. naga is not needed.
+
+Nothing here has been added to a `Cargo.toml`.
 
 ## Open questions
 

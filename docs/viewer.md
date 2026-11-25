@@ -5,10 +5,14 @@ volumes. It turns a volume into an RGBA image for one camera position, and it ca
 extract and rasterise an isosurface mesh. It is the reference that a GPU renderer would
 be checked against.
 
-**What this is not.** There is no GPU code, no WebGPU or wgpu, no browser build and no
-desktop application. There is no window and no interactive control loop. The `tptbio`
-command line does not render either: `tptbio view` prints a data summary of an image.
-The GPU viewer described in spec ADR-003 is not started (todo.md, Phase 4).
+**What this is not.** There is no native GPU code and no desktop application, and wgpu will
+not be used because its dependency tree fails the licence policy. There is no window and no
+interactive control loop. The `tptbio` command line does not render either: `tptbio view`
+prints a data summary of an image. A browser WebGPU path exists in the `webgpu` module
+(wasm32 only) but has not been run in a browser. The planned native GPU backend is Vulkan
+through `ash` with an offline-compiled SPIR-V shader. It would implement `RenderBackend`
+in `render3d::backend`, whose only implementation today is `CpuBackend`
+(`docs/dependency-audit.md`, "Native GPU candidates").
 
 ## What is in the module
 
@@ -92,7 +96,8 @@ call `isosurface` on an `Image<f32>` field with an iso value, then `rasterise_me
 ## Limits
 
 - **CPU only, and slow for large volumes.** The renderer marches every pixel's ray
-  through the whole volume. Use `downsample_max` and `choose_level` to render a
+  through the whole volume. Rows run in parallel with rayon on native targets, and the
+  output is identical to a serial run. Use `downsample_max` and `choose_level` to render a
   coarser level, but nothing does this automatically.
 - **No chunked or streamed volumes.** A `Volume` is held in memory as f32 per channel.
   The todo item for chunked streaming is not done.
