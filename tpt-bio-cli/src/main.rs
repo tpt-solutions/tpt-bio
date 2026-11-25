@@ -520,11 +520,7 @@ fn view_sam(args: &ViewArgs) -> CliResult {
         }
         w.finish()?;
     } else {
-        let mut w = SamWriter::new(out, header)?;
-        while let Some(rec) = reader.next_record()? {
-            w.write_record(&rec)?;
-        }
-        w.finish()?;
+        write_sam_batched(out, header, std::iter::from_fn(|| reader.next_record().transpose()))?;
     }
     Ok(())
 }
@@ -558,11 +554,49 @@ fn view_bam(args: &ViewArgs) -> CliResult {
         let mut w = BamWriter::new(out, header)?;
         write_selected(&mut reader, records, |rec| w.write_record(rec))?;
         w.finish()?;
+    } else if let Some(fetched) = records {
+        write_sam_batched(out, header, fetched.into_iter().map(Ok))?;
     } else {
         let mut w = SamWriter::new(out, header)?;
-        write_selected(&mut reader, records, |rec| w.write_record(rec))?;
+        let mut bodies = Vec::with_capacity(SAM_BATCH);
+        loop {
+            bodies.clear();
+            if reader.read_raw_batch(SAM_BATCH, &mut bodies)? == 0 {
+                break;
+            }
+            w.write_bam_batch(&bodies)?;
+        }
         w.finish()?;
     }
+    Ok(())
+}
+
+/// Records formatted per parallel batch of SAM output.
+const SAM_BATCH: usize = 4096;
+
+/// Writes SAM text for every record in `records`, in batches formatted in parallel.
+fn write_sam_batched(
+    out: Box<dyn Write>,
+    header: Header,
+    records: impl Iterator<Item = tpt_bio_seq::Result<tpt_bio_seq::Record>>,
+) -> CliResult {
+    let mut w = SamWriter::new(out, header)?;
+    let mut records = records;
+    let mut batch = Vec::with_capacity(SAM_BATCH);
+    loop {
+        batch.clear();
+        while batch.len() < SAM_BATCH {
+            match records.next() {
+                Some(rec) => batch.push(rec?),
+                None => break,
+            }
+        }
+        if batch.is_empty() {
+            break;
+        }
+        w.write_batch(&batch)?;
+    }
+    w.finish()?;
     Ok(())
 }
 

@@ -387,15 +387,24 @@ fn deflate(payload: &[u8], level: Compression) -> Result<Vec<u8>> {
     Ok(enc.finish()?)
 }
 
+/// Full blocks compressed together. Their deflate calls run in parallel on the rayon
+/// pool, so a batch of this size is about 4 MiB of uncompressed data.
+const BATCH_BLOCKS: usize = 64;
+
 /// Streaming BGZF writer. Implements [`Write`].
+///
+/// Full blocks are queued and compressed in parallel, then written in order. Output is
+/// byte-identical to compressing each block alone, so the file does not depend on thread
+/// count.
 ///
 /// Call [`BgzfWriter::finish`] to flush the last block and write the EOF marker.
 /// Dropping the writer without calling `finish` leaves the file without an EOF
-/// marker.
+/// marker, and queued blocks are not written.
 #[derive(Debug)]
 pub struct BgzfWriter<W: Write> {
     inner: W,
     buf: Vec<u8>,
+    pending: Vec<Vec<u8>>,
     level: Compression,
     written: u64,
 }
@@ -408,29 +417,58 @@ impl<W: Write> BgzfWriter<W> {
 
     /// Creates a writer with an explicit compression level.
     pub fn with_level(inner: W, level: Compression) -> Self {
-        Self { inner, buf: Vec::with_capacity(MAX_BLOCK_PAYLOAD), level, written: 0 }
+        Self {
+            inner,
+            buf: Vec::with_capacity(MAX_BLOCK_PAYLOAD),
+            pending: Vec::with_capacity(BATCH_BLOCKS),
+            level,
+            written: 0,
+        }
     }
 
     /// The virtual offset at which the next byte will be written.
-    #[must_use]
-    pub fn virtual_position(&self) -> VirtualOffset {
-        VirtualOffset::new(self.written, self.buf.len() as u16).unwrap_or(VirtualOffset(0))
+    ///
+    /// Takes `&mut self` because queued blocks are compressed first, so the offset is
+    /// exact. The offset is the position in the compressed output.
+    pub fn virtual_position(&mut self) -> Result<VirtualOffset> {
+        self.write_pending()?;
+        Ok(VirtualOffset::new(self.written, self.buf.len() as u16).unwrap_or(VirtualOffset(0)))
     }
 
-    fn flush_block(&mut self) -> Result<()> {
-        if self.buf.is_empty() {
+    /// Moves the partly filled buffer into the queue as a block.
+    fn queue_buffer(&mut self) {
+        if !self.buf.is_empty() {
+            let full = std::mem::replace(&mut self.buf, Vec::with_capacity(MAX_BLOCK_PAYLOAD));
+            self.pending.push(full);
+        }
+    }
+
+    /// Compresses every queued block in parallel and writes them in order.
+    fn write_pending(&mut self) -> Result<()> {
+        if self.pending.is_empty() {
             return Ok(());
         }
-        let block = compress_block(&self.buf, self.level)?;
-        self.inner.write_all(&block)?;
-        self.written += block.len() as u64;
-        self.buf.clear();
+        let level = self.level;
+        let blocks: Vec<Vec<u8>> = self
+            .pending
+            .par_iter()
+            .map(|payload| compress_block(payload, level))
+            .collect::<Result<_>>()?;
+        self.pending.clear();
+        for block in &blocks {
+            self.inner.write_all(block)?;
+            self.written += block.len() as u64;
+        }
         Ok(())
     }
 
     /// Flushes the final block, writes the EOF marker and returns the inner writer.
+    ///
+    /// # Errors
+    /// Returns an error if compression or writing fails.
     pub fn finish(mut self) -> Result<W> {
-        self.flush_block()?;
+        self.queue_buffer();
+        self.write_pending()?;
         self.inner.write_all(&EOF_MARKER)?;
         self.inner.flush()?;
         Ok(self.inner)
@@ -446,7 +484,10 @@ impl<W: Write> Write for BgzfWriter<W> {
             self.buf.extend_from_slice(&data[..n]);
             data = &data[n..];
             if self.buf.len() == MAX_BLOCK_PAYLOAD {
-                self.flush_block().map_err(|e| io::Error::other(e.to_string()))?;
+                self.queue_buffer();
+                if self.pending.len() >= BATCH_BLOCKS {
+                    self.write_pending().map_err(|e| io::Error::other(e.to_string()))?;
+                }
             }
         }
         Ok(total)
@@ -601,7 +642,7 @@ mod tests {
         let mut w = BgzfWriter::new(Vec::new());
         let mut marks = Vec::new();
         for chunk in data.chunks(10_000) {
-            marks.push((w.virtual_position(), chunk.len()));
+            marks.push((w.virtual_position().unwrap(), chunk.len()));
             w.write_all(chunk).unwrap();
         }
         let file = w.finish().unwrap();

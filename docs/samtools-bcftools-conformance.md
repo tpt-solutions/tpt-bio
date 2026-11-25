@@ -116,3 +116,18 @@ region has 4,813 records with the same SHA-256.
 
 So tptbio builds an index faster and answers region queries faster than samtools here, but
 full-file SAM output is slower. The genome-scale milestone is still open.
+
+## View after parallel output (2026-11-26)
+
+The first `tptbio seq view` run on this file used one thread to write output. Two changes
+follow, and the output is unchanged:
+
+- The BGZF writer compresses blocks in batches of 64 on the rayon pool, writing them in order.
+  `tptbio seq view -b` went from 35 s to about 5 s on the same file.
+- `seq view` reads records in batches of 4096 raw bodies, and parses and formats each batch on
+  the rayon pool. SAM output went from about 4.0 s to about 2.2 to 2.7 s, against samtools'
+  3.2 s median.
+
+Checks: the SAM record stream has the same SHA-256 as before (2,931,500 records). The BAM
+output passes `samtools quickcheck`, and samtools reads 2,931,500 records from it with the
+same record hash. A new unit test checks that batched output matches record-by-record output.

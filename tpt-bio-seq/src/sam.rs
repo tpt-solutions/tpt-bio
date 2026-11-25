@@ -1,5 +1,6 @@
 //! SAM text reading and writing.
 
+use rayon::prelude::*;
 use std::io::{BufRead, Write};
 
 use crate::error::{Result, SeqError};
@@ -364,6 +365,61 @@ impl<W: Write> SamWriter<W> {
         Ok(())
     }
 
+    /// Writes a batch of records. The text is formatted in parallel on the rayon pool
+    /// and written in input order, so the output matches calling [`write_record`] for
+    /// each record.
+    ///
+    /// # Errors
+    /// Same as [`write_record`](Self::write_record).
+    pub fn write_batch(&mut self, records: &[Record]) -> Result<()> {
+        const CHUNK: usize = 256;
+        let header = &self.header;
+        let chunks: Vec<Vec<u8>> = records
+            .par_chunks(CHUNK)
+            .map(|chunk| {
+                let mut text = Vec::with_capacity(chunk.len() * 200);
+                for rec in chunk {
+                    format_record_into(rec, header, &mut text)?;
+                    text.push(b'\n');
+                }
+                Ok(text)
+            })
+            .collect::<Result<_>>()?;
+        for text in &chunks {
+            self.inner.write_all(text)?;
+        }
+        Ok(())
+    }
+
+    /// Writes a batch of raw BAM record bodies as SAM text. Each body is parsed and
+    /// formatted on the rayon pool, and the text is written in input order.
+    ///
+    /// Bodies come from [`crate::bam::BamReader::read_raw_batch`].
+    ///
+    /// # Errors
+    /// Returns an error for a malformed record or a reference ID outside the header, or on
+    /// I/O failure.
+    pub fn write_bam_batch(&mut self, bodies: &[Vec<u8>]) -> Result<()> {
+        const CHUNK: usize = 256;
+        let header = &self.header;
+        let chunks: Vec<Vec<u8>> = bodies
+            .par_chunks(CHUNK)
+            .map(|chunk| {
+                let mut text = Vec::with_capacity(chunk.len() * 200);
+                for body in chunk {
+                    let rec = crate::bam::RecordView::new(body)?.to_record()?;
+                    format_record_into(&rec, header, &mut text)?;
+                    text.push(b'\n');
+                }
+                Ok(text)
+            })
+            .collect::<Result<_>>()?;
+        for text in &chunks {
+            self.inner.write_all(text)?;
+        }
+        Ok(())
+    }
+
     /// Flushes and returns the inner writer.
     ///
     /// # Errors
@@ -383,6 +439,40 @@ mod tests {
 r1\t99\tchr1\t101\t60\t4M2I3M\t=\t201\t150\tACGTACGTAG\tIIIIIIIIII\tNM:i:2\tRG:Z:rg1\tXB:B:i,1,2,3\n\
 r2\t4\t*\t0\t0\t*\t*\t0\t0\tACG\t*\tAS:i:-5\n\
 r3\t16\tchr2\t10\t30\t3M\tchr1\t50\t0\tTTT\tFFF\tZZ:A:x\tXF:f:1.5\n";
+
+    #[test]
+    fn batched_bam_bodies_match_record_by_record_output() {
+        // Parse the SAM fixture, store it as BAM, then format it through the batched
+        // raw-body path. The text must equal the record-by-record SAM text.
+        let mut reader = SamReader::new(SAM.as_bytes()).unwrap();
+        let header = reader.header().clone();
+        let mut bam = crate::bam::BamWriter::new(Vec::new(), header.clone()).unwrap();
+        let mut expected = SamWriter::new(Vec::new(), header.clone()).unwrap();
+        while let Some(rec) = reader.next_record().unwrap() {
+            bam.write_record(&rec).unwrap();
+            expected.write_record(&rec).unwrap();
+        }
+        let bam_bytes = bam.finish().unwrap();
+        let expected_text = expected.finish().unwrap();
+
+        let mut bgzf_reader = crate::bam::BamReader::new(bam_bytes.as_slice()).unwrap();
+        let mut bodies = Vec::new();
+        assert_eq!(bgzf_reader.read_raw_batch(100, &mut bodies).unwrap(), 3);
+        assert_eq!(bgzf_reader.read_raw_batch(100, &mut bodies).unwrap(), 0);
+
+        let mut got = SamWriter::new(Vec::new(), header).unwrap();
+        got.write_bam_batch(&bodies).unwrap();
+        let got_text = got.finish().unwrap();
+        // Both writers write the header first; compare only the record lines.
+        let records = |t: &[u8]| -> Vec<u8> {
+            t.split(|&b| b == b'\n')
+                .filter(|l| !l.starts_with(b"@"))
+                .flat_map(|l| l.iter().chain(b"\n"))
+                .copied()
+                .collect()
+        };
+        assert_eq!(records(&got_text), records(&expected_text));
+    }
 
     #[test]
     fn parse_fields() {

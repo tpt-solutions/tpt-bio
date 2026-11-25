@@ -570,6 +570,32 @@ impl<R: Read> BamReader<R> {
     }
 
     /// Reads the next record as an owned [`Record`].
+    /// Reads up to `max` raw record bodies (the bytes after each block size) and appends
+    /// them to `out`. Returns how many were read, which is 0 at the end of the file.
+    ///
+    /// Each body can be parsed with [`RecordView::new`] on another thread, which is how
+    /// [`crate::sam::SamWriter::write_bam_batch`] formats records in parallel.
+    ///
+    /// # Errors
+    /// Returns [`SeqError::Malformed`] for a truncated record, and I/O errors.
+    pub fn read_raw_batch(&mut self, max: usize, out: &mut Vec<Vec<u8>>) -> Result<usize> {
+        let mut read = 0;
+        while read < max {
+            let mut size_bytes = [0u8; 4];
+            let n = read_up_to(&mut self.inner, &mut size_bytes)?;
+            if n == 0 {
+                break;
+            }
+            if n < 4 {
+                return Err(bad("truncated record size"));
+            }
+            let size = u32::from_le_bytes(size_bytes) as usize;
+            out.push(read_vec(&mut self.inner, size)?);
+            read += 1;
+        }
+        Ok(read)
+    }
+
     pub fn next_record(&mut self) -> Result<Option<Record>> {
         match self.next_view()? {
             Some(view) => view.to_record().map(Some),
