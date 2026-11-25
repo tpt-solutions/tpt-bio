@@ -197,7 +197,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Edge detection (Sobel, Scharr, Canny) _(Canny has no built-in smoothing)_
 - [x] Morphology (erode, dilate, open, close, top-hat) in 2D/3D
 - [x] Runtime feature detection (AVX2 / AVX-512 / NEON) with scalar fallback _(`tpt-bio-vision::simd::backend()` reports the detected ISA; the `scalar-only` feature forces tpt-simd's scalar kernels; the 242 crate tests pass under both builds, 2026-11-25; benchmarks still open below)_
-- [ ] Benchmarks vs scalar baseline and reference implementations
+- [ ] Benchmarks vs scalar baseline and reference implementations _(`examples/simd_bench.rs`, a 2048x2048 separable Gaussian blur, sigma 2: the AVX2 build and the scalar-only build both take about 123 ms median on this Windows machine. So no SIMD speedup is measured, although the backend reports avx2+fma. Open: find where the time goes, and check that the convolution path reaches the tpt-simd kernels. No reference implementation is compared yet)_
 
 ### Segmentation
 - [x] Otsu thresholding (global + adaptive/local) _(global, tile-based and sliding-window Otsu)_
@@ -293,7 +293,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Performance regression checks in CI _(.github/workflows/perf.yml runs weekly and on demand, informational only; not run on GitHub)_
 - [x] Extended fuzzing run, fix findings _(2026-11-25, nightly cargo-fuzz in WSL: each of the ten parser targets ran for about 500 s, bgzf_decompress 500 s twice. One real bug found and fixed: a BGZF block whose BSIZE was smaller than its header and footer panicked (c338925). Every saved artifact now replays cleanly. Open: a 42-byte CRAM input declares a 67 MB rANS output, within the 256 MiB per-block cap. Release decode takes about 0.2 s, so the fuzz build's 14 s is debug assertions. A limit across all blocks in one file is not yet implemented)_
 - [x] Memory-safety review of every remaining `unsafe` block _(one unsafe block in tpt-bio-seq mmap; MappedFile::open is now unsafe)_
-- [ ] Cross-platform test pass (Linux/macOS/Windows, x86_64 + aarch64) _(Windows x86_64 only tested locally; see docs/platforms.md)_
+- [ ] Cross-platform test pass (Linux/macOS/Windows, x86_64 + aarch64) _(Windows x86_64 passes locally. Linux x86_64 in WSL passed the full default-member workspace test run, 23 suites, 2026-11-25, with a separate target directory. macOS and aarch64 are not run)_
 - [x] `no_std` verification on an embedded target _(tpt-bio-core builds for thumbv7em-none-eabihf with --no-default-features)_
 
 ### License & compliance (final)
