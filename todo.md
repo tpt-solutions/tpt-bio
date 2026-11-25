@@ -266,7 +266,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 ### tpt-bio-cli (`tptbio`)
 - [x] clap command tree: `seq`, `vision`, `pipeline run`, `stats`, `view` _(`vision` and `pipeline run` are stubs)_
 - [x] Shell completions and man pages _(bash, zsh, fish, powershell, elvish; one man page per command)_
-- [ ] Consistent output formats, exit codes, logging/verbosity _(exit codes 0/1/2 and -q/-v, output formats; logging is limited)_
+- [ ] Consistent output formats, exit codes, logging/verbosity _(exit codes 0/1/2 are documented in the CLI README and tested; `seq export` now renders `table` as aligned columns, as the other row commands do; logging is still limited to -q/-v and log levels in the config file)_
 - [x] Config file support _(tptbio.toml with threads (recorded only), log_level, output_format)_
 - [x] CLI integration tests _(integration tests run against the built binary)_
 - [ ] Prebuilt binaries via CI (Linux/macOS/Windows) _(not done for the CLI; wheels.yml exists for Python only and has not run)_

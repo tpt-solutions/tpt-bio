@@ -158,7 +158,7 @@ enum SeqCmd {
     Export {
         /// SAM or BAM file.
         input: PathBuf,
-        /// Output format. `table` is not supported here and falls back to CSV.
+        /// Output format: csv, jsonl or table.
         /// Defaults to the global `--output-format`, then CSV.
         #[arg(short, long, value_enum)]
         format: Option<OutputFormat>,
@@ -690,20 +690,21 @@ fn seq_sort(input: &Path, output: &Path) -> CliResult {
 }
 
 fn seq_export(input: &Path, format: Option<OutputFormat>, output: Option<&Path>) -> CliResult {
-    let format = match format.unwrap_or(OutputFormat::Csv) {
-        OutputFormat::Table => {
-            log_warn("seq export has no table layout; writing CSV instead");
-            OutputFormat::Csv
-        }
-        other => other,
-    };
+    let format = format.unwrap_or(OutputFormat::Csv);
     let (header, records) = read_all(input)?;
-    let text = match format {
-        OutputFormat::Jsonl => tpt_bio_seq::records_to_jsonl(&records, &header),
-        _ => tpt_bio_seq::records_to_csv(&records, &header)?,
-    };
     let mut out = open_output(output)?;
-    out.write_all(text.as_bytes())?;
+    match format {
+        OutputFormat::Jsonl => {
+            out.write_all(tpt_bio_seq::records_to_jsonl(&records, &header).as_bytes())?;
+        }
+        OutputFormat::Csv => {
+            out.write_all(tpt_bio_seq::records_to_csv(&records, &header)?.as_bytes())?;
+        }
+        OutputFormat::Table => {
+            let (names, rows) = tpt_bio_seq::records_to_rows(&records, &header)?;
+            output::write_rows(&mut *out, OutputFormat::Table, &names, &rows)?;
+        }
+    }
     out.flush()?;
     Ok(())
 }

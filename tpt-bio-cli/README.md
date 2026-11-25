@@ -82,9 +82,20 @@ tptbio man ./man            # writes one page per command into ./man
 
 ## Exit codes
 
-- `0`: success.
-- Non-zero: a usage error, a sequencing error or a runtime error. Each is reported
-  on standard error with a short message.
+Every message goes to standard error, prefixed with `tptbio:`.
+
+- `0`: the command succeeded.
+- `1`: the command ran and failed. This covers I/O errors, malformed or unsupported input,
+  missing files, failed image or pipeline steps, and unreadable configuration files.
+- `2`: the command line was wrong. This covers unknown options, missing required arguments,
+  and an unknown shell for `completions`.
+
+## Output formats
+
+`--output-format` (or `output_format` in the configuration file) selects `csv`, `jsonl` or
+`table` for commands that print rows. Those are `seq view` for variant files, `seq export`,
+`vision features`, `stats normalize`, `stats pca` and `pipeline run`. The default is CSV.
+`table` prints aligned columns for reading in a terminal. Use CSV or JSON Lines for scripts.
 
 ## Source layout
 

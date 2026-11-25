@@ -430,11 +430,13 @@ fn export_format_follows_flag_then_config_then_default() {
     let out = tptbio(&["--config", cfg_path, "--output-format", "csv", "seq", "export", sam_path]);
     assert!(stdout(&out).starts_with("qname,"), "{}", stdout(&out));
 
-    // A table request on export falls back to CSV with a warning.
+    // A table request gives aligned columns: a header line, then one line per record.
     let out = tptbio(&["--output-format", "table", "seq", "export", sam_path]);
     assert_eq!(code(&out), EXIT_OK, "{}", stderr(&out));
-    assert!(stdout(&out).starts_with("qname,"), "{}", stdout(&out));
-    assert!(stderr(&out).contains("no table layout"), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.lines().next().unwrap().starts_with("qname"), "{text}");
+    assert!(!text.contains(','), "table output should not be CSV: {text}");
+    assert!(!stderr(&out).contains("no table layout"), "{}", stderr(&out));
 }
 
 #[test]
