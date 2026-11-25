@@ -15,7 +15,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 **Open decisions** (what is still open after the 2026-11-24 review)
 - **Poisson:** recommendation is to reimplement the PMF and CDF on `libm` (`lgamma`, incomplete gamma and beta) so the distributions work in `no_std`. Keep `tpt-math-prob-dist` as a dev-dependency oracle in tests. **Decided: recommendation followed.** Implemented on `libm`; no oracle crate is available offline, so tests use hand-computed values.
 - **Crates.io publishing:** `tpt-crypto` and `target-lexicon-mit` are git pins, and crates.io rejects git dependencies. Phase 6 needs published versions or vendored copies.
-- **wgpu and the Apache-2.0-only rule (decided 2026-11-25):** wgpu is rejected. Its tree has `codespan-reporting`, a non-optional naga dependency that is Apache-2.0 only, so no feature choice removes it. `gl_generator`, `glutin_wgl_sys` (Apache-2.0 only), `hexf-parse` (CC0-1.0) and `paste` (RUSTSEC-2024-0436) also fail the policy. Native GPU rendering is dropped. Browser WebGPU goes through `web-sys` and `wasm-bindgen` (MIT OR Apache-2.0) instead.
+- **wgpu and the Apache-2.0-only rule (decided 2026-11-25):** wgpu is rejected. Its tree has `codespan-reporting`, a non-optional naga dependency that is Apache-2.0 only, so no feature choice removes it. `gl_generator`, `glutin_wgl_sys` (Apache-2.0 only), `hexf-parse` (CC0-1.0) and `paste` (RUSTSEC-2024-0436) also fail the policy. wgpu-based native GPU rendering is dropped. Browser WebGPU goes through `web-sys` and `wasm-bindgen` (MIT OR Apache-2.0) instead. **Native follow-up (2026-11-25): Vulkan through `ash` with an offline-compiled SPIR-V shader, behind the `RenderBackend` trait.** `ash` passed the licence audit; the webview route (`wry`) failed it. `tpt-gpu` was considered and skipped (no Vulkan or D3D12, no WGSL or SPIR-V input, no 3D textures, pre-1.0).
 - **TLS for remote I/O:** `tpt-crypto` covers SHA-256 and HMAC but not a TLS client. `tpt-crypto-rustls` is unaudited. **Decided for now: no TLS.** Remote I/O is plain `http://` only, and `https://` is rejected. SigV4 over `http://` sends signatures in cleartext, so this is not safe on untrusted networks.
 
 ---
@@ -196,8 +196,8 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Median / mean filters
 - [x] Edge detection (Sobel, Scharr, Canny) _(Canny has no built-in smoothing)_
 - [x] Morphology (erode, dilate, open, close, top-hat) in 2D/3D
-- [x] Runtime feature detection (AVX2 / AVX-512 / NEON) with scalar fallback _(`tpt-bio-vision::simd::backend()` reports the detected ISA; the `scalar-only` feature forces tpt-simd's scalar kernels; the 242 crate tests pass under both builds, 2026-11-25; benchmarks still open below)_
-- [ ] Benchmarks vs scalar baseline and reference implementations _(`examples/simd_bench.rs`, a 2048x2048 separable Gaussian blur, sigma 2: the AVX2 build and the scalar-only build both take about 123 ms median on this Windows machine. So no SIMD speedup is measured, although the backend reports avx2+fma. Open: find where the time goes, and check that the convolution path reaches the tpt-simd kernels. No reference implementation is compared yet)_
+- [ ] Runtime feature detection (AVX2 / AVX-512 / NEON) with scalar fallback _(reopened 2026-11-25. `tpt-simd` chooses its vector kernels at compile time, from target features, so runtime detection does not change the kernels. `simd::backend()` now reports the compiled kernels, and `detected_features()` reports the CPU. The default build stays baseline x86_64 for portability. Still open: true runtime dispatch, which needs a change in tpt-simd or per-ISA builds)_
+- [ ] Benchmarks vs scalar baseline and reference implementations _(`examples/simd_bench.rs`, a 2048x2048 separable Gaussian blur, sigma 2, median of 7. Baseline build: about 117 ms. Built with `RUSTFLAGS="-C target-feature=+avx,+fma"`: about 22 ms, roughly 5 times faster. Still open: a reference implementation to compare against, and the other filters)_
 
 ### Segmentation
 - [x] Otsu thresholding (global + adaptive/local) _(global, tile-based and sliding-window Otsu)_
@@ -237,9 +237,12 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Quality metrics (Z-prime, SSMD) _(`stats::qc`)_
 - [ ] Tests vs scikit-learn reference results _(BLOCKED: scikit-learn not available)_
 
-### 3D viewer (wgpu, ADR-003)
+### 3D viewer (ADR-003, wgpu superseded)
 - [x] Architecture note: share the rendering paradigm with tpt-vertex _(docs/architecture-3d-viewer.md; tpt-vertex not available, so the comparison is unverified)_
-- [ ] wgpu (check license expression) volume renderer: texture upload, ray-marching _(**wgpu rejected** by the licence policy, see the open decisions. Native GPU rendering is dropped. The WGSL shader is `tpt-bio-vision/src/render3d/raycast.wgsl`, used by the browser path, and the retired wgpu host code is in `gpu-draft/wgpu_host.rs.txt`)_
+- [x] ~~wgpu volume renderer~~ _(wgpu rejected by the licence policy, see the open decisions. Closed as won't-do. The WGSL shader is `tpt-bio-vision/src/render3d/raycast.wgsl`, used by the browser path, and the retired wgpu host code is in `gpu-draft/wgpu_host.rs.txt`)_
+- [x] Native render backend seam _(`render3d::backend`: `RenderBackend` trait, `CpuBackend`. `render_volume` and `render_labelled` now run rows in parallel with rayon, output identical to the serial reference)_
+- [x] Licence audit of native GPU candidates _(2026-11-25, docs/dependency-audit.md: `ash` 0.38 + `libloading` pass; `wry` fails on `dpi` (Apache-2.0 AND MIT) and `dunce` (MIT-0 not allowed) and has a `*-sys` crate)_
+- [ ] Native Vulkan backend: `ash` + offline-compiled SPIR-V ray caster implementing `RenderBackend` _(chosen 2026-11-25. Needs a decision on run-time Vulkan loading (`libloading`) against the zero-FFI rule. Port `raycast.wgsl` to SPIR-V offline and commit the `.spv`. Check output against `CpuBackend`. Windows and Linux; Metal is separate)_
 - [x] Label/mask overlay and per-cell coloring _(CPU renderer, first-hit blending)_
 - [x] Mesh / isosurface rendering of segmented cells _(marching tetrahedra and a flat-shaded CPU rasteriser)_
 - [x] Large-volume handling (chunked/streamed, level of detail) _(block-max LOD with the usual rule: coarsest level whose voxels cover at most N pixels. `render3d::stream` builds levels from a `SlabSource` one z-slab at a time, equal to the in-memory result. `stream_level_for_camera` streams only the level the camera needs. `OmeSlabs` is a file-backed source over OME-TIFF planes, verified on single- and multi-channel files. `ZarrSlabs` reads `[z, y, x]` and `[c, z, y, x]` Zarr arrays through the new `ZarrArray::read_block`, which fetches only the chunks a slab overlaps; a test counts the chunk reads. The interactive viewer is not built, as with the camera controls item)_

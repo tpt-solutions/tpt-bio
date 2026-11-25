@@ -1,15 +1,20 @@
-//! CPU feature detection for the `tpt-simd` kernels, with a scalar fallback.
+//! CPU feature reporting for the `tpt-simd` kernels.
 //!
-//! `tpt-simd` selects a kernel at run time from the CPU's features (the default
-//! `runtime-dispatch` feature). It falls back to scalar code on CPUs without the features it
-//! needs. This module reports which features the host has and which backend a build uses.
-//! Building with the `scalar-only` feature forces the scalar kernels, so the fallback path can
-//! be tested on any machine.
+//! `tpt-simd` chooses its vector kernels when the crate is compiled, from the target
+//! features in effect. The default build targets the baseline `x86_64` ISA, so its kernels
+//! are the non-vector fallback even on a CPU with AVX2. [`backend`] reports the kernels
+//! the binary was built with. [`detected_features`] reports what the running CPU supports,
+//! which is useful for choosing a build, but does not change the kernels.
+//!
+//! To build with vector kernels, set the target features when compiling, for example
+//! `RUSTFLAGS="-C target-feature=+avx,+fma"` (or `-C target-cpu=native`). A binary built
+//! that way needs a CPU with those features. The `scalar-only` feature forces the fallback
+//! kernels on any build.
 
 use tpt_simd::detect::Features;
 
 /// Backend names reported by [`backend`].
-pub const BACKENDS: [&str; 6] = ["scalar", "sse4.1", "avx2+fma", "avx512", "neon", "sve"];
+pub const BACKENDS: [&str; 6] = ["scalar", "sse4.1", "avx+fma", "avx512", "neon", "sve"];
 
 /// CPU features the host reports at run time.
 #[must_use]
@@ -17,26 +22,22 @@ pub fn detected_features() -> Features {
     Features::runtime()
 }
 
-/// Name of the backend this build uses on the running CPU.
+/// Name of the kernels this binary was compiled to use.
 ///
-/// The name is the highest of the detected ISAs that `tpt-simd` dispatches on. It is `"scalar"`
-/// when the crate was built with `scalar-only`, or when the CPU has none of them.
+/// `"scalar"` when the crate was built with `scalar-only`, or when the target features
+/// enable no vector kernel in `tpt-simd`.
 #[must_use]
 pub fn backend() -> &'static str {
     if cfg!(feature = "scalar-only") {
-        return "scalar";
-    }
-    let f = detected_features();
-    if f.avx512f {
+        "scalar"
+    } else if cfg!(all(target_arch = "x86_64", target_feature = "avx512f")) {
         "avx512"
-    } else if f.avx2 && f.fma {
-        "avx2+fma"
-    } else if f.sse41 {
+    } else if cfg!(all(target_arch = "x86_64", target_feature = "avx", target_feature = "fma")) {
+        "avx+fma"
+    } else if cfg!(all(target_arch = "x86_64", target_feature = "sse4.1")) {
         "sse4.1"
-    } else if f.neon {
+    } else if cfg!(target_arch = "aarch64") {
         "neon"
-    } else if f.sve {
-        "sve"
     } else {
         "scalar"
     }
