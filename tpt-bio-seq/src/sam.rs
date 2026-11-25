@@ -366,7 +366,7 @@ impl<W: Write> SamWriter<W> {
     }
 
     /// Writes a batch of records. The text is formatted in parallel on the rayon pool
-    /// and written in input order, so the output matches calling [`write_record`] for
+    /// and written in input order, so the output matches calling [`write_record`](Self::write_record) for
     /// each record.
     ///
     /// # Errors
