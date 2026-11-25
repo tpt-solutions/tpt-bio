@@ -64,7 +64,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Dependabot / Renovate config _(Dependabot)_
 
 ### Test data & tooling
-- [ ] Choose permissively-licensed test data (small BAM/CRAM/VCF/FASTQ, OME-TIFF, Zarr) _(tests are self-contained with generated data; external fixtures not chosen, see docs/test-data.md)_
+- [ ] Choose permissively-licensed test data (small BAM/CRAM/VCF/FASTQ, OME-TIFF, Zarr) _(decided, see docs/test-data.md: generated in code, or written by reference tools and committed with provenance; no downloads. Still open: the human-genome-scale BAM, and BBBC images, whose host did not answer)_
 - [x] Set up the benchmark harness: `tpt-benchmark` (git dev-dependency, pinned to `8384f44`) replaces `criterion`, which is removed _(its Apache-only transitive crates are no longer in the lock; `borsh-derive` is a stale lock entry, see docs/dependency-audit.md)_
 - [x] Set up `cargo-fuzz` infrastructure _(fuzz/ builds; targets not yet run under libFuzzer)_
 - [x] Install samtools/bcftools locally for oracle comparisons (test-only, never linked) _(installed in WSL Ubuntu: samtools 1.22.1, bcftools 1.22, tabix 1.22.1; not on the Windows PATH, and never linked into the crates)_
