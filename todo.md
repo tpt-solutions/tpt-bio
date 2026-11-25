@@ -303,7 +303,7 @@ Dual-licensed MIT OR Apache-2.0 · © 2026 TPT Solutions · Pure Rust, zero-FFI,
 - [x] Confirm headers/Cargo metadata/LICENSE files consistent in all crates and in the Python package _(READMEs and readme keys are consistent; `LICENSE-MIT` and `LICENSE-APACHE` copied byte-identical into each library and CLI crate and into `bindings/tpt-bio-py`; crates inherit `license` from the workspace)_
 
 ### Release
-- [ ] Choose final crate names and check availability on crates.io _(names listed; availability not checked, since there was no network access)_
+- [x] Choose final crate names and check availability on crates.io _(decided: keep the current names. On 2026-11-25 the crates.io index returned 404 for tpt-bio, tpt-bio-core, tpt-bio-seq, tpt-bio-vision, tpt-bio-pipeline and tpt-bio-cli, and PyPI returned 404 for tpt-bio. Nothing is reserved, since nothing is published)_
 - [ ] Publish order: core -> seq / vision -> pipeline -> cli
 - [ ] `cargo publish --dry-run` for all crates _(run 2026-11-25, dry-run only, nothing uploaded: tpt-bio-core passes; seq, vision, pipeline and cli fail because tpt-bio-core is not on crates.io yet; tpt-bio-vision also depends on git pins, `tpt-crypto-hash` and `tpt-benchmark`, which crates.io rejects)_
 - [ ] Publish the Python package to PyPI
